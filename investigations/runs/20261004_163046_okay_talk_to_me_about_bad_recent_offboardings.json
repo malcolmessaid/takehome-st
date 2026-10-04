@@ -1,0 +1,364 @@
+{
+  "question": "okay talk to me about bad recent offboardings?",
+  "model": "openai/gpt-5.6-sol",
+  "queries": [
+    {
+      "step": 0,
+      "purpose": "Count people whose employment ended in the last 30 days.",
+      "sql": "SELECT COUNT(*) AS ended_people, MIN(end_date) AS earliest_end, MAX(end_date) AS latest_end FROM people WHERE employment_status = 'ended' AND end_date BETWEEN date('2026-08-15T12:00:00Z','-30 days') AND date('2026-08-15T12:00:00Z')",
+      "result_chars": 125,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "List recent ended workers and summarize active accounts and application access.",
+      "sql": "SELECT p.person_id, p.full_name, p.worker_type, p.department, p.end_date, SUM(CASE WHEN i.status='active' THEN 1 ELSE 0 END) AS active_idp_accounts, COUNT(DISTINCT CASE WHEN aua.status='active' THEN aua.access_id END) AS active_apps, COUNT(DISTINCT CASE WHEN w.status='active' THEN w.account_id END) AS active_workspace_accounts, COUNT(DISTINCT CASE WHEN g.status='active' THEN g.account_id END) AS active_github_accounts FROM people p LEFT JOIN idp_accounts i ON i.person_id=p.person_id LEFT JOIN application_user_access aua ON aua.idp_account_id=i.account_id LEFT JOIN workspace_accounts w ON w.person_id=p.person_id LEFT JOIN github_accounts g ON g.person_id=p.person_id WHERE p.employment_status='ended' AND p.end_date BETWEEN date('2026-08-15T12:00:00Z','-30 days') AND date('2026-08-15T12:00:00Z') GROUP BY p.person_id ORDER BY p.end_date DESC",
+      "result_chars": 1752,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "Count post-employment audit activity for recent offboardings.",
+      "sql": "SELECT p.person_id, p.full_name, p.end_date, COUNT(DISTINCT e.event_id) AS post_end_events, MAX(e.occurred_at) AS latest_event FROM people p JOIN (SELECT person_id, account_id FROM idp_accounts WHERE person_id IS NOT NULL UNION ALL SELECT person_id, account_id FROM workspace_accounts WHERE person_id IS NOT NULL UNION ALL SELECT person_id, account_id FROM github_accounts WHERE person_id IS NOT NULL) a ON a.person_id=p.person_id JOIN audit_events e ON e.actor_type='account' AND e.actor_id=a.account_id AND e.occurred_at >= p.end_date || 'T00:00:00Z' WHERE p.employment_status='ended' AND p.end_date BETWEEN date('2026-08-15T12:00:00Z','-30 days') AND date('2026-08-15T12:00:00Z') GROUP BY p.person_id ORDER BY post_end_events DESC",
+      "result_chars": 336,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "Summarize other current access and devices for recent offboardings.",
+      "sql": "SELECT p.person_id, p.full_name, COUNT(DISTINCT CASE WHEN gom.revoked_at IS NULL THEN gom.membership_id END) AS github_org_memberships, COUNT(DISTINCT CASE WHEN gtm.revoked_at IS NULL THEN gtm.membership_id END) AS github_teams, COUNT(DISTINCT CASE WHEN grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at>'2026-08-15T12:00:00Z') THEN grc.permission_id END) AS github_direct_repos, COUNT(DISTINCT CASE WHEN wo.revoked_at IS NULL THEN wo.grant_id END) AS oauth_grants, COUNT(DISTINCT CASE WHEN d.retired_at IS NULL THEN d.device_id END) AS unretired_devices FROM people p LEFT JOIN github_accounts ga ON ga.person_id=p.person_id LEFT JOIN github_org_memberships gom ON gom.account_id=ga.account_id LEFT JOIN github_team_memberships gtm ON gtm.account_id=ga.account_id LEFT JOIN github_repo_collaborators grc ON grc.account_id=ga.account_id LEFT JOIN workspace_accounts wa ON wa.person_id=p.person_id LEFT JOIN workspace_oauth_grants wo ON wo.account_id=wa.account_id LEFT JOIN devices d ON d.person_id=p.person_id WHERE p.employment_status='ended' AND p.end_date BETWEEN date('2026-08-15T12:00:00Z','-30 days') AND date('2026-08-15T12:00:00Z') GROUP BY p.person_id ORDER BY p.end_date DESC",
+      "result_chars": 1262,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Get account and active application records for the two failed recent offboardings.",
+      "sql": "SELECT p.person_id, p.full_name, p.end_date, i.account_id AS idp_account_id, i.username, i.status AS idp_status, i.last_login_at, u.access_id, a.name AS application_name, a.sensitivity, u.role, u.status AS access_status, u.last_authenticated_at FROM people p JOIN idp_accounts i ON i.person_id=p.person_id LEFT JOIN application_user_access u ON u.idp_account_id=i.account_id AND u.status='active' LEFT JOIN applications a ON a.application_id=u.application_id WHERE p.person_id IN ('per_001941','per_001945') ORDER BY p.person_id, a.name",
+      "result_chars": 5405,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Get Workspace, GitHub, and device records for the two failed recent offboardings.",
+      "sql": "SELECT p.person_id, p.full_name, wa.account_id AS workspace_account_id, wa.status AS workspace_status, wa.last_login_at AS workspace_last_login, ga.account_id AS github_account_id, ga.login, ga.status AS github_status, ga.last_active_at, d.device_id, d.platform, d.ownership, d.compliance_status, d.last_check_in_at, d.retired_at FROM people p LEFT JOIN workspace_accounts wa ON wa.person_id=p.person_id LEFT JOIN github_accounts ga ON ga.person_id=p.person_id LEFT JOIN devices d ON d.person_id=p.person_id AND d.retired_at IS NULL WHERE p.person_id IN ('per_001941','per_001945') ORDER BY p.person_id",
+      "result_chars": 1002,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Get current GitHub organization and team membership IDs for the two failed offboardings.",
+      "sql": "SELECT p.person_id, ga.account_id, gom.membership_id AS org_membership_id, gom.org_role, gom.source AS org_source, gtm.membership_id AS team_membership_id, gt.name AS team_name, gtm.role AS team_role, gtm.source AS team_source FROM people p JOIN github_accounts ga ON ga.person_id=p.person_id LEFT JOIN github_org_memberships gom ON gom.account_id=ga.account_id AND gom.revoked_at IS NULL LEFT JOIN github_team_memberships gtm ON gtm.account_id=ga.account_id AND gtm.revoked_at IS NULL LEFT JOIN github_teams gt ON gt.team_id=gtm.team_id WHERE p.person_id IN ('per_001941','per_001945') ORDER BY p.person_id, gt.name",
+      "result_chars": 1326,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Inspect post-end account activity for the two failed recent offboardings.",
+      "sql": "SELECT p.person_id, p.full_name, p.end_date, e.event_id, e.occurred_at, e.system, e.event_type, e.actor_type, e.actor_id, e.target_type, e.target_id, e.source, e.outcome, e.ip_address, e.details_json FROM people p JOIN (SELECT person_id, account_id FROM idp_accounts WHERE person_id IS NOT NULL UNION SELECT person_id, account_id FROM workspace_accounts WHERE person_id IS NOT NULL UNION SELECT person_id, account_id FROM github_accounts WHERE person_id IS NOT NULL) a ON a.person_id=p.person_id JOIN audit_events e ON e.actor_type='account' AND e.actor_id=a.account_id AND e.occurred_at >= p.end_date || 'T00:00:00Z' WHERE p.person_id IN ('per_001941','per_001945') ORDER BY e.occurred_at",
+      "result_chars": 2839,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Check current direct and inherited Drive access for the two failed offboardings.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, membership_id, depth) AS (SELECT wa.account_id, m.group_id, m.membership_id, 1 FROM workspace_accounts wa JOIN workspace_group_memberships m ON m.member_type='account' AND m.member_id=wa.account_id AND m.revoked_at IS NULL WHERE wa.person_id IN ('per_001941','per_001945') UNION SELECT ag.account_id, m.group_id, m.membership_id, ag.depth+1 FROM account_groups ag JOIN workspace_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10), perms AS (SELECT wa.person_id, wa.account_id, dp.permission_id, dp.principal_type, dr.resource_id, dr.name, dr.classification, dp.role FROM workspace_accounts wa JOIN drive_permissions dp ON dp.principal_type='account' AND dp.principal_id=wa.account_id AND dp.revoked_at IS NULL AND (dp.expires_at IS NULL OR dp.expires_at>'2026-08-15T12:00:00Z') JOIN drive_resources dr ON dr.resource_id=dp.resource_id WHERE wa.person_id IN ('per_001941','per_001945') UNION SELECT wa.person_id, wa.account_id, dp.permission_id, dp.principal_type, dr.resource_id, dr.name, dr.classification, dp.role FROM workspace_accounts wa JOIN account_groups ag ON ag.account_id=wa.account_id JOIN drive_permissions dp ON dp.principal_type='group' AND dp.principal_id=ag.group_id AND dp.revoked_at IS NULL AND (dp.expires_at IS NULL OR dp.expires_at>'2026-08-15T12:00:00Z') JOIN drive_resources dr ON dr.resource_id=dp.resource_id WHERE wa.person_id IN ('per_001941','per_001945')) SELECT * FROM perms ORDER BY person_id, name",
+      "result_chars": 8255,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Identify current GitHub repository access for the two failed offboardings.",
+      "sql": "SELECT p.person_id, ga.account_id, r.repository_id, r.name, r.sensitivity, r.visibility, x.permission_id, x.permission, x.access_path, x.membership_id FROM people p JOIN github_accounts ga ON ga.person_id=p.person_id JOIN (SELECT tm.account_id, trp.repository_id, trp.permission_id, trp.permission, 'team' AS access_path, tm.membership_id FROM github_team_memberships tm JOIN github_team_repo_permissions trp ON trp.team_id=tm.team_id AND trp.revoked_at IS NULL WHERE tm.revoked_at IS NULL UNION ALL SELECT c.account_id, c.repository_id, c.permission_id, c.permission, 'direct', NULL FROM github_repo_collaborators c WHERE c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at>'2026-08-15T12:00:00Z')) x ON x.account_id=ga.account_id JOIN github_repositories r ON r.repository_id=x.repository_id WHERE p.person_id IN ('per_001941','per_001945') ORDER BY p.person_id, r.name",
+      "result_chars": 3710,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Describe resources accessed after employment ended.",
+      "sql": "SELECT e.event_id, e.occurred_at, e.actor_id, e.event_type, e.target_id, COALESCE(dr.name,gr.name) AS target_name, COALESCE(dr.classification,gr.sensitivity) AS target_sensitivity FROM audit_events e LEFT JOIN drive_resources dr ON e.target_type='drive_resource' AND dr.resource_id=e.target_id LEFT JOIN github_repositories gr ON e.target_type='repository' AND gr.repository_id=e.target_id WHERE e.event_id IN ('evt_00014550','evt_00018627','evt_00048004','evt_00048016') ORDER BY e.occurred_at",
+      "result_chars": 973,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Count distinct current Drive resources by classification for each failed offboarding.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, depth) AS (SELECT wa.account_id,m.group_id,1 FROM workspace_accounts wa JOIN workspace_group_memberships m ON m.member_type='account' AND m.member_id=wa.account_id AND m.revoked_at IS NULL WHERE wa.person_id IN ('per_001941','per_001945') UNION SELECT ag.account_id,m.group_id,ag.depth+1 FROM account_groups ag JOIN workspace_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10), perms AS (SELECT wa.person_id,dr.resource_id,dr.classification FROM workspace_accounts wa JOIN drive_permissions dp ON dp.principal_type='account' AND dp.principal_id=wa.account_id AND dp.revoked_at IS NULL AND (dp.expires_at IS NULL OR dp.expires_at>'2026-08-15T12:00:00Z') JOIN drive_resources dr ON dr.resource_id=dp.resource_id WHERE wa.person_id IN ('per_001941','per_001945') UNION SELECT wa.person_id,dr.resource_id,dr.classification FROM workspace_accounts wa JOIN account_groups ag ON ag.account_id=wa.account_id JOIN drive_permissions dp ON dp.principal_type='group' AND dp.principal_id=ag.group_id AND dp.revoked_at IS NULL AND (dp.expires_at IS NULL OR dp.expires_at>'2026-08-15T12:00:00Z') JOIN drive_resources dr ON dr.resource_id=dp.resource_id WHERE wa.person_id IN ('per_001941','per_001945')) SELECT person_id, classification, COUNT(DISTINCT resource_id) AS resource_count, MIN(resource_id) AS example_resource_id FROM perms GROUP BY person_id,classification ORDER BY person_id,classification",
+      "result_chars": 401,
+      "error": null
+    }
+  ],
+  "other_tool_calls": [
+    {
+      "step": 0,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/identity_provider_repo.py"
+      },
+      "result_chars": 6242,
+      "error": null
+    },
+    {
+      "step": 0,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/github_repo.py"
+      },
+      "result_chars": 4041,
+      "error": null
+    },
+    {
+      "step": 0,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/workspace_repo.py"
+      },
+      "result_chars": 2166,
+      "error": "Not readable: access_agent/repos/workspace_repo.py"
+    },
+    {
+      "step": 1,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/google_workspace_repo.py"
+      },
+      "result_chars": 5382,
+      "error": null
+    },
+    {
+      "step": 1,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/removal_analysis_repo.py"
+      },
+      "result_chars": 2173,
+      "error": "Not readable: access_agent/repos/removal_analysis_repo.py"
+    }
+  ],
+  "report": {
+    "summary": "Two recent offboardings are seriously incomplete. Rowan Mercer and Ariel Chen retain active core accounts and critical applications, with successful account activity after their employment ended.",
+    "findings": [
+      {
+        "title": "Rowan retained and used access",
+        "statement": "Rowan retains active IdP, Workspace, GitHub, and critical app access; post-end activity included a push to production-critical payments-api.",
+        "kind": "fact",
+        "evidence_ids": [
+          "evt_00048004",
+          "per_001941",
+          "idpa_001941",
+          "gwa_001941",
+          "gha_001941",
+          "aua_007681",
+          "aua_007686",
+          "aua_007683",
+          "aua_007687",
+          "aua_007684",
+          "aua_007685"
+        ]
+      },
+      {
+        "title": "Ariel retained and used access",
+        "statement": "Ariel retains active IdP, Workspace, GitHub, and critical app access; successful post-end IdP login and Drive viewing occurred.",
+        "kind": "fact",
+        "evidence_ids": [
+          "evt_00037716",
+          "evt_00048016",
+          "per_001945",
+          "idpa_001945",
+          "gwa_001945",
+          "gha_001945",
+          "aua_007708",
+          "aua_007705",
+          "aua_007709",
+          "aua_007706",
+          "aua_007707"
+        ]
+      },
+      {
+        "title": "Sensitive GitHub access remains",
+        "statement": "Both people retain team-based private repository access, including production-critical repositories.",
+        "kind": "fact",
+        "evidence_ids": [
+          "ghom_000893",
+          "ghtm_001384",
+          "ghtm_001386",
+          "ghtrp_000033",
+          "ghtrp_000151",
+          "ghom_000897",
+          "ghtm_001393",
+          "ghtrp_000085"
+        ]
+      },
+      {
+        "title": "Restricted Drive access remains",
+        "statement": "Both people retain group-based Drive access to restricted resources.",
+        "kind": "fact",
+        "evidence_ids": [
+          "drvp_000207",
+          "drv_000010",
+          "drvp_000175",
+          "drv_000026"
+        ]
+      },
+      {
+        "title": "Company devices remain enrolled",
+        "statement": "Both retain unretired company Windows devices; Rowan\u2019s device checked in after employment ended.",
+        "kind": "fact",
+        "evidence_ids": [
+          "dev_001941",
+          "dev_001945",
+          "per_001941",
+          "per_001945"
+        ]
+      },
+      {
+        "title": "Urgent containment is warranted",
+        "statement": "Successful account actions after both end dates, combined with broad retained access, indicate offboarding failure rather than harmless stale records.",
+        "kind": "inference",
+        "evidence_ids": [
+          "evt_00023825",
+          "evt_00014550",
+          "evt_00018627",
+          "evt_00048004",
+          "evt_00037716",
+          "evt_00048016"
+        ]
+      }
+    ],
+    "data_gaps": [
+      "\u201cRecent\u201d was interpreted as the 30 days through 2026-08-15; audit logs are incomplete and account events do not prove which human acted."
+    ],
+    "recommended_actions": [
+      "Immediately suspend Rowan\u2019s and Ariel\u2019s IdP, Workspace, and GitHub accounts and revoke active application sessions.",
+      "Remove their GitHub organization and team memberships, then verify repository access is gone.",
+      "Remove Workspace group memberships and verify restricted Drive access is gone.",
+      "Retire or recover both company devices and investigate their recent check-ins.",
+      "Review the post-end repository push, Drive views, login events, source IPs, and related activity."
+    ],
+    "verification": {
+      "ids_checked": 48,
+      "ids_not_found_in_draft": [],
+      "ids_not_found_in_final": [],
+      "findings_changed": 6,
+      "findings_dropped": 1,
+      "revised": true
+    },
+    "proposed_tools": [
+      {
+        "name": "find_recent_incomplete_offboardings",
+        "description": "Find ended people in a date range who retain active core accounts or application access. Returns person, account, and access IDs suitable for evidence.",
+        "parameters": [
+          {
+            "name": "since_date",
+            "type": "date",
+            "description": "Earliest employment end date to include."
+          },
+          {
+            "name": "snapshot_date",
+            "type": "date",
+            "description": "Snapshot calendar date through which end dates are included."
+          }
+        ],
+        "sql": "SELECT p.person_id, p.full_name, p.end_date, i.account_id AS idp_account_id, i.status AS idp_status, w.account_id AS workspace_account_id, w.status AS workspace_status, g.account_id AS github_account_id, g.status AS github_status, u.access_id, u.status AS app_access_status, u.application_id FROM people p LEFT JOIN idp_accounts i ON i.person_id=p.person_id LEFT JOIN workspace_accounts w ON w.person_id=p.person_id LEFT JOIN github_accounts g ON g.person_id=p.person_id LEFT JOIN application_user_access u ON u.idp_account_id=i.account_id AND u.status='active' WHERE p.employment_status='ended' AND p.end_date BETWEEN :since_date AND :snapshot_date AND (i.status='active' OR w.status='active' OR g.status='active' OR u.access_id IS NOT NULL) ORDER BY p.end_date DESC, p.person_id, u.access_id",
+        "example_args": {
+          "since_date": "2026-07-16",
+          "snapshot_date": "2026-08-15"
+        },
+        "supports_findings": [
+          1,
+          2
+        ],
+        "validation": "ok: 13 rows"
+      },
+      {
+        "name": "get_post_end_account_activity",
+        "description": "Return audit events attributed to any linked IdP, Workspace, or GitHub account after a person's employment end date.",
+        "parameters": [
+          {
+            "name": "person_id",
+            "type": "string",
+            "description": "HR person ID to investigate."
+          }
+        ],
+        "sql": "SELECT p.person_id, p.end_date, a.account_id, e.event_id, e.occurred_at, e.system, e.event_type, e.actor_type, e.actor_id, e.target_type, e.target_id, e.source, e.outcome, e.ip_address, e.details_json FROM people p JOIN (SELECT person_id, account_id FROM idp_accounts WHERE person_id IS NOT NULL UNION SELECT person_id, account_id FROM workspace_accounts WHERE person_id IS NOT NULL UNION SELECT person_id, account_id FROM github_accounts WHERE person_id IS NOT NULL) a ON a.person_id=p.person_id JOIN audit_events e ON e.actor_type='account' AND e.actor_id=a.account_id AND e.occurred_at >= p.end_date || 'T00:00:00Z' WHERE p.person_id=:person_id ORDER BY e.occurred_at",
+        "example_args": {
+          "person_id": "per_001941"
+        },
+        "supports_findings": [
+          1,
+          2,
+          6
+        ],
+        "validation": "ok: 4 rows"
+      },
+      {
+        "name": "get_current_github_access_for_person",
+        "description": "Return current organization, team, and repository access for a person, including permission and membership evidence IDs.",
+        "parameters": [
+          {
+            "name": "person_id",
+            "type": "string",
+            "description": "HR person ID to investigate."
+          },
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Timestamp used to exclude expired direct collaborator grants."
+          }
+        ],
+        "sql": "SELECT p.person_id, ga.account_id, gom.membership_id AS org_membership_id, x.membership_id AS team_membership_id, x.permission_id, x.repository_id, r.name AS repository_name, r.sensitivity, x.permission, x.access_path FROM people p JOIN github_accounts ga ON ga.person_id=p.person_id LEFT JOIN github_org_memberships gom ON gom.account_id=ga.account_id AND gom.revoked_at IS NULL JOIN (SELECT tm.account_id, tm.membership_id, trp.permission_id, trp.repository_id, trp.permission, 'team' AS access_path FROM github_team_memberships tm JOIN github_team_repo_permissions trp ON trp.team_id=tm.team_id AND trp.revoked_at IS NULL WHERE tm.revoked_at IS NULL UNION ALL SELECT c.account_id, NULL, c.permission_id, c.repository_id, c.permission, 'direct' FROM github_repo_collaborators c WHERE c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at>:snapshot_at)) x ON x.account_id=ga.account_id JOIN github_repositories r ON r.repository_id=x.repository_id WHERE p.person_id=:person_id ORDER BY r.name, x.permission_id",
+        "example_args": {
+          "person_id": "per_001941",
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          3
+        ],
+        "validation": "ok: 7 rows"
+      },
+      {
+        "name": "get_current_drive_access_for_person",
+        "description": "Resolve current direct and nested-group Drive access for a person. Returns permission, membership, and resource IDs with classification.",
+        "parameters": [
+          {
+            "name": "person_id",
+            "type": "string",
+            "description": "HR person ID to investigate."
+          },
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Timestamp used to exclude expired permissions."
+          }
+        ],
+        "sql": "WITH RECURSIVE account_groups(account_id, group_id, membership_id, depth) AS (SELECT wa.account_id,m.group_id,m.membership_id,1 FROM workspace_accounts wa JOIN workspace_group_memberships m ON m.member_type='account' AND m.member_id=wa.account_id AND m.revoked_at IS NULL WHERE wa.person_id=:person_id UNION SELECT ag.account_id,m.group_id,m.membership_id,ag.depth+1 FROM account_groups ag JOIN workspace_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10) SELECT wa.person_id, wa.account_id, dp.permission_id, NULL AS membership_id, dr.resource_id, dr.name AS resource_name, dr.classification, dp.role, dp.principal_type FROM workspace_accounts wa JOIN drive_permissions dp ON dp.principal_type='account' AND dp.principal_id=wa.account_id JOIN drive_resources dr ON dr.resource_id=dp.resource_id WHERE wa.person_id=:person_id AND dp.revoked_at IS NULL AND (dp.expires_at IS NULL OR dp.expires_at>:snapshot_at) UNION ALL SELECT wa.person_id, wa.account_id, dp.permission_id, ag.membership_id, dr.resource_id, dr.name, dr.classification, dp.role, dp.principal_type FROM workspace_accounts wa JOIN account_groups ag ON ag.account_id=wa.account_id JOIN drive_permissions dp ON dp.principal_type='group' AND dp.principal_id=ag.group_id JOIN drive_resources dr ON dr.resource_id=dp.resource_id WHERE wa.person_id=:person_id AND dp.revoked_at IS NULL AND (dp.expires_at IS NULL OR dp.expires_at>:snapshot_at)",
+        "example_args": {
+          "person_id": "per_001941",
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          4
+        ],
+        "validation": "ok: 12 rows"
+      },
+      {
+        "name": "get_unretired_devices_for_person",
+        "description": "Return all unretired devices linked to a person, including ownership, compliance, and last check-in details.",
+        "parameters": [
+          {
+            "name": "person_id",
+            "type": "string",
+            "description": "HR person ID to investigate."
+          }
+        ],
+        "sql": "SELECT p.person_id, p.end_date, d.device_id, d.platform, d.ownership, d.compliance_status, d.enrolled_at, d.last_check_in_at, d.retired_at FROM people p JOIN devices d ON d.person_id=p.person_id WHERE p.person_id=:person_id AND d.retired_at IS NULL ORDER BY d.device_id",
+        "example_args": {
+          "person_id": "per_001941"
+        },
+        "supports_findings": [
+          5
+        ],
+        "validation": "ok: 1 rows"
+      }
+    ]
+  }
+}

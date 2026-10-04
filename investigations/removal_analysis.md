@@ -147,6 +147,63 @@ RECOMMENDED ACTIONS
 
 (This run used the earlier report format. The current format adds a short title to each finding and caps evidence display at 6 IDs.)
 
+## Example run: "Check whether everyone who left had their access removed."
+
+Current format, with the evidence check. Tool calls: `list_removed_people` → `analyze_removal` on recent and high-risk leavers → `get_leftover_direct_grants`, `find_unlinked_accounts`, `find_lifecycle_anomalies` → draft report → evidence check → final report.
+
+```text
+SUMMARY
+  No, offboarding is incomplete. Three former workers retain active critical access and post-departure
+  account activity, while 22 former workers retain direct grants or OAuth authorizations.
+
+FINDINGS
+  1. Three accounts remain active
+     Ariel Chen, Rowan Mercer, and Talia Brooks retain active IdP and critical application access after leaving.
+     evidence: idpa_001945, aua_007708, idpa_001941, aua_007681, idpa_001942, aua_007692
+  2. Post-departure activity recorded
+     Accounts linked to the three active former workers recorded login, Drive, or GitHub activity up to
+     36 days after departure.
+     evidence: evt_00048016, evt_00037716, evt_00048004, evt_00018627, evt_00048007, evt_00011532
+  3. Production repositories exposed
+     Rowan and Talia retain active production-critical repository access; Casey retains a dormant
+     production grant on a suspended account.
+     evidence: gha_001941, ghtm_001386, ghtm_001384, ghtrp_000151, ghtrp_000033, gha_001942 +5 more
+  4. Direct grants survived offboarding
+     Former workers retain Drive, GitHub, or OAuth grants, including Talia Hall's confidential Drive
+     editor permission created after departure.
+     evidence: per_000775, drvp_000140, per_000031, oag_000005, per_000279, oag_000044 +4 more
+  5. New access after departure
+     Former workers received new Drive, GitHub, and OAuth access after leaving, including grants to
+     Talia Hall, Priya Petrov, Jonah Anders, and Theo Johnson.
+     evidence: per_000775, drvp_000140, per_001550, ghrp_000072, per_000589, ghrp_000094 +2 more
+  6. Contractor policy failed
+     Rowan and Talia were routed to manual review because no contractor deactivation policy matched,
+     leaving their IdP accounts active.
+     evidence: evt_00048002, evt_00048006, idpa_001941, idpa_001942
+  7. Unowned bot remains active
+     An unlinked release bot remains active with write access to a production-critical payments
+     repository and recent activity.
+     evidence: gha_900001, ghom_000946, ghrp_000143
+
+DATA GAPS
+  - Only recent and highest-risk departures received full per-person checks; the company-wide
+    direct-grant sweep does not cover every indirect entitlement.
+  - Five former workers have impossible HR dates, so timing conclusions for those records are unreliable.
+  - Audit logs are incomplete and cannot identify the human behind every account event.
+
+RECOMMENDED ACTIONS
+  1. Immediately disable Ariel Chen, Rowan Mercer, and Talia Brooks across IdP, Workspace, GitHub, VPN,
+     and critical applications.
+  2. Investigate their post-departure activity and preserve relevant audit, endpoint, and repository evidence.
+  3. Revoke all surviving Drive, GitHub collaborator, and OAuth grants held by former workers; transfer
+     remaining Drive ownership.
+  4. Fix contractor offboarding policy and alert when manual review is unresolved at the end date.
+  5. Validate ownership and necessity of the legacy release bot, then rotate its credentials and reduce
+     repository access.
+
+Evidence check: 31 IDs checked, 0 not found in draft, revised: yes, findings changed: 5, dropped: 0
+```
+
 ## How we checked it
 
 - Ran `analyze_person` on all 69 people and read the flagged cases. The first run flagged 21 people as critical; most were false positives where the IdP `last_login_at` equals `deactivated_at` on the UTC day after a local end date. Adding a 1-day timezone tolerance moved those to low.
