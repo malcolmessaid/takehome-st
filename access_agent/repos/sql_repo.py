@@ -7,9 +7,9 @@ class SqlRepo:
     def __init__(self, db: Database | None = None):
         self.db = db or Database()
 
-    def run_query(self, sql: str, max_rows: int) -> tuple[list[dict], bool]:
+    def run_query(self, sql: str, max_rows: int, params: dict | tuple = ()) -> tuple[list[dict], bool]:
         """Returns up to max_rows rows and whether more rows were available."""
-        rows = self.db.query(sql, max_rows=max_rows + 1)
+        rows = self.db.query(sql, params, max_rows=max_rows + 1)
         return rows[:max_rows], len(rows) > max_rows
 
     def get_schema_ddl(self) -> str:

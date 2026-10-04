@@ -48,3 +48,17 @@ class GithubRepo:
             WHERE c.account_id = ? AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > ?) ORDER BY r.name
         """
         return self.db.query(sql, (account_id, snapshot_at))
+
+    def get_collaborator_grants_of_ended_people(self, snapshot_at: str, person_id: str | None = None) -> list[dict[str, Any]]:
+        """Unrevoked, unexpired direct repository grants on the GitHub account of someone marked ended."""
+        sql = """
+            SELECT g.person_id, g.account_id, g.login, g.status AS account_status, c.permission_id, c.permission, c.approval_reference,
+                   r.repository_id, r.name AS repository_name, r.sensitivity
+            FROM people pe JOIN github_accounts g ON g.person_id = pe.person_id
+            JOIN github_repo_collaborators c ON c.account_id = g.account_id
+            JOIN github_repositories r ON r.repository_id = c.repository_id
+            WHERE pe.employment_status = 'ended' AND (:person_id IS NULL OR pe.person_id = :person_id)
+              AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > :snapshot_at)
+            ORDER BY g.person_id, r.name
+        """
+        return self.db.query(sql, {"snapshot_at": snapshot_at, "person_id": person_id})

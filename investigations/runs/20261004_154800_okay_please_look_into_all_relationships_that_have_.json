@@ -1,0 +1,317 @@
+{
+  "question": "Okay please look into All relationships that have been revoked And then look at the application user access and check to see if there are any missing pieces there",
+  "model": "openai/gpt-5.6-sol",
+  "queries": [
+    {
+      "step": 0,
+      "purpose": "Count revoked relationships across access tables and application access statuses.",
+      "sql": "SELECT 'idp_group_memberships' AS source, COUNT(*) AS revoked_count FROM idp_group_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'idp_app_assignments', COUNT(*) FROM idp_app_assignments WHERE revoked_at IS NOT NULL UNION ALL SELECT 'workspace_group_memberships', COUNT(*) FROM workspace_group_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'drive_permissions', COUNT(*) FROM drive_permissions WHERE revoked_at IS NOT NULL UNION ALL SELECT 'workspace_oauth_grants', COUNT(*) FROM workspace_oauth_grants WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_org_memberships', COUNT(*) FROM github_org_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_team_memberships', COUNT(*) FROM github_team_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_team_repo_permissions', COUNT(*) FROM github_team_repo_permissions WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_repo_collaborators', COUNT(*) FROM github_repo_collaborators WHERE revoked_at IS NOT NULL UNION ALL SELECT 'application_user_access', COUNT(*) FROM application_user_access WHERE revoked_at IS NOT NULL OR status = 'revoked';",
+      "result_chars": 641,
+      "error": null
+    },
+    {
+      "step": 0,
+      "purpose": "Summarize application access rows by status and revocation timestamp consistency.",
+      "sql": "SELECT status, CASE WHEN revoked_at IS NULL THEN 'no_revoked_at' ELSE 'has_revoked_at' END AS timestamp_state, COUNT(*) AS row_count FROM application_user_access GROUP BY status, timestamp_state ORDER BY status, timestamp_state;",
+      "result_chars": 278,
+      "error": null
+    },
+    {
+      "step": 0,
+      "purpose": "List audit event types related to revocation or deprovisioning.",
+      "sql": "SELECT system, event_type, COUNT(*) AS event_count FROM audit_events WHERE event_type LIKE '%revok%' OR event_type LIKE '%deprovision%' OR event_type LIKE '%membership.remov%' OR event_type LIKE '%unassign%' GROUP BY system, event_type ORDER BY event_count DESC;",
+      "result_chars": 48,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "Count application access mismatches against current direct and nested IdP assignments.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, depth) AS ( SELECT member_id, group_id, 1 FROM idp_group_memberships WHERE member_type = 'account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, ag.depth + 1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type = 'group' AND m.member_id = ag.group_id AND m.revoked_at IS NULL WHERE ag.depth < 10 ), expected AS ( SELECT principal_id AS account_id, application_id FROM idp_app_assignments WHERE principal_type = 'account' AND revoked_at IS NULL UNION SELECT ag.account_id, x.application_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type = 'group' AND x.principal_id = ag.group_id AND x.revoked_at IS NULL ), pairs AS ( SELECT DISTINCT account_id, application_id FROM expected ), issues AS ( SELECT 'expected_missing_row' AS issue, p.account_id, p.application_id, NULL AS access_id FROM pairs p LEFT JOIN application_user_access u ON u.idp_account_id = p.account_id AND u.application_id = p.application_id WHERE u.access_id IS NULL UNION ALL SELECT 'expected_not_active', p.account_id, p.application_id, u.access_id FROM pairs p JOIN application_user_access u ON u.idp_account_id = p.account_id AND u.application_id = p.application_id WHERE u.status <> 'active' UNION ALL SELECT 'active_scim_without_assignment', u.idp_account_id, u.application_id, u.access_id FROM application_user_access u LEFT JOIN pairs p ON p.account_id = u.idp_account_id AND p.application_id = u.application_id WHERE u.status = 'active' AND u.provisioning_source = 'idp_scim' AND p.account_id IS NULL ) SELECT issue, COUNT(*) AS issue_count FROM issues GROUP BY issue ORDER BY issue_count DESC;",
+      "result_chars": 220,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "Summarize revoked relationship timing and affected distinct principals.",
+      "sql": "SELECT source, COUNT(*) AS revoked_rows, COUNT(DISTINCT subject_id) AS distinct_subjects, MIN(revoked_at) AS earliest_revoked_at, MAX(revoked_at) AS latest_revoked_at FROM ( SELECT 'idp_group_memberships' AS source, member_id AS subject_id, revoked_at FROM idp_group_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'workspace_group_memberships', member_id, revoked_at FROM workspace_group_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_org_memberships', account_id, revoked_at FROM github_org_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_team_memberships', account_id, revoked_at FROM github_team_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'application_user_access', idp_account_id, revoked_at FROM application_user_access WHERE revoked_at IS NOT NULL ) GROUP BY source ORDER BY source;",
+      "result_chars": 929,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "Check whether revoked application access rows belong to ended workers or disabled IdP accounts.",
+      "sql": "SELECT p.employment_status, ia.status AS idp_status, COUNT(*) AS revoked_access_rows, COUNT(DISTINCT u.idp_account_id) AS accounts FROM application_user_access u JOIN idp_accounts ia ON ia.account_id = u.idp_account_id LEFT JOIN people p ON p.person_id = ia.person_id WHERE u.status = 'revoked' GROUP BY p.employment_status, ia.status ORDER BY revoked_access_rows DESC;",
+      "result_chars": 153,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "Check application access row completeness and timestamp ordering.",
+      "sql": "SELECT issue, COUNT(*) AS issue_count FROM ( SELECT CASE WHEN status = 'revoked' AND revoked_at IS NULL THEN 'revoked_missing_timestamp' WHEN status <> 'revoked' AND revoked_at IS NOT NULL THEN 'nonrevoked_has_timestamp' WHEN revoked_at IS NOT NULL AND revoked_at < assigned_at THEN 'revoked_before_assigned' WHEN last_authenticated_at IS NOT NULL AND last_authenticated_at > '2026-08-15T12:00:00Z' THEN 'future_authentication' WHEN last_mfa_at IS NOT NULL AND last_authenticated_at IS NOT NULL AND last_mfa_at > last_authenticated_at THEN 'mfa_after_last_auth' END AS issue FROM application_user_access ) WHERE issue IS NOT NULL GROUP BY issue;",
+      "result_chars": 103,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Find revoked-relationship accounts that still have non-revoked application access.",
+      "sql": "WITH revoked_accounts AS ( SELECT DISTINCT member_id AS account_id FROM idp_group_memberships WHERE member_type = 'account' AND revoked_at IS NOT NULL ) SELECT u.access_id, u.idp_account_id, a.application_id, a.name AS application_name, u.status, u.provisioning_source, u.assigned_at, u.revoked_at, ia.status AS idp_status, p.person_id, p.employment_status FROM revoked_accounts r JOIN application_user_access u ON u.idp_account_id = r.account_id JOIN applications a ON a.application_id = u.application_id JOIN idp_accounts ia ON ia.account_id = u.idp_account_id LEFT JOIN people p ON p.person_id = ia.person_id WHERE u.status <> 'revoked' OR u.revoked_at IS NULL ORDER BY u.idp_account_id, a.name;",
+      "result_chars": 48,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "List current assignments whose application access is not active.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, membership_id, depth) AS ( SELECT member_id, group_id, membership_id, 1 FROM idp_group_memberships WHERE member_type = 'account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, m.membership_id, ag.depth + 1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type = 'group' AND m.member_id = ag.group_id AND m.revoked_at IS NULL WHERE ag.depth < 10 ), expected AS ( SELECT assignment_id, principal_id AS account_id, application_id, principal_type, principal_id FROM idp_app_assignments WHERE principal_type = 'account' AND revoked_at IS NULL UNION ALL SELECT x.assignment_id, ag.account_id, x.application_id, x.principal_type, x.principal_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type = 'group' AND x.principal_id = ag.group_id AND x.revoked_at IS NULL ) SELECT DISTINCT e.assignment_id, e.account_id, e.application_id, a.name AS application_name, e.principal_type, e.principal_id, u.access_id, u.status, u.revoked_at, ia.status AS idp_status, p.person_id, p.employment_status FROM expected e JOIN application_user_access u ON u.idp_account_id=e.account_id AND u.application_id=e.application_id JOIN applications a ON a.application_id=e.application_id JOIN idp_accounts ia ON ia.account_id=e.account_id LEFT JOIN people p ON p.person_id=ia.person_id WHERE u.status <> 'active' ORDER BY e.account_id, e.application_id;",
+      "result_chars": 1085,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Break down expected assignments missing application access by account and employment state.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, depth) AS ( SELECT member_id, group_id, 1 FROM idp_group_memberships WHERE member_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10 ), expected AS ( SELECT principal_id account_id, application_id FROM idp_app_assignments WHERE principal_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, x.application_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.revoked_at IS NULL ), pairs AS (SELECT DISTINCT account_id, application_id FROM expected) SELECT ia.status AS idp_status, p.employment_status, COUNT(*) AS missing_pairs, COUNT(DISTINCT q.account_id) AS accounts, COUNT(DISTINCT q.application_id) AS applications FROM pairs q JOIN idp_accounts ia ON ia.account_id=q.account_id LEFT JOIN people p ON p.person_id=ia.person_id LEFT JOIN application_user_access u ON u.idp_account_id=q.account_id AND u.application_id=q.application_id WHERE u.access_id IS NULL GROUP BY ia.status, p.employment_status ORDER BY missing_pairs DESC;",
+      "result_chars": 497,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "List application access rows with revocation before assignment.",
+      "sql": "SELECT u.access_id, u.idp_account_id, u.application_id, a.name AS application_name, u.assigned_at, u.revoked_at, ia.status AS idp_status, p.person_id, p.employment_status FROM application_user_access u JOIN applications a ON a.application_id=u.application_id JOIN idp_accounts ia ON ia.account_id=u.idp_account_id LEFT JOIN people p ON p.person_id=ia.person_id WHERE u.revoked_at IS NOT NULL AND u.revoked_at < u.assigned_at ORDER BY u.revoked_at;",
+      "result_chars": 6467,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "List expected application access missing for ended workers.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, membership_id, depth) AS ( SELECT member_id, group_id, membership_id, 1 FROM idp_group_memberships WHERE member_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, m.membership_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10 ), expected AS ( SELECT assignment_id, principal_id account_id, application_id, principal_type, principal_id, NULL AS membership_id FROM idp_app_assignments WHERE principal_type='account' AND revoked_at IS NULL UNION ALL SELECT x.assignment_id, ag.account_id, x.application_id, x.principal_type, x.principal_id, ag.membership_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.revoked_at IS NULL ) SELECT DISTINCT e.assignment_id, e.membership_id, e.account_id, e.application_id, a.name AS application_name, p.person_id, p.full_name, p.employment_status, ia.status AS idp_status FROM expected e JOIN idp_accounts ia ON ia.account_id=e.account_id JOIN people p ON p.person_id=ia.person_id JOIN applications a ON a.application_id=e.application_id LEFT JOIN application_user_access u ON u.idp_account_id=e.account_id AND u.application_id=e.application_id WHERE u.access_id IS NULL AND p.employment_status='ended' ORDER BY e.account_id;",
+      "result_chars": 586,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Return representative missing access rows for active workers with assignment evidence.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, membership_id, depth) AS ( SELECT member_id, group_id, membership_id, 1 FROM idp_group_memberships WHERE member_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, m.membership_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10 ), expected AS ( SELECT assignment_id, principal_id account_id, application_id, principal_type, principal_id, NULL AS membership_id FROM idp_app_assignments WHERE principal_type='account' AND revoked_at IS NULL UNION ALL SELECT x.assignment_id, ag.account_id, x.application_id, x.principal_type, x.principal_id, ag.membership_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.revoked_at IS NULL ) SELECT DISTINCT e.assignment_id, e.membership_id, e.account_id, e.application_id, a.name AS application_name, p.person_id, p.employment_status, ia.status AS idp_status FROM expected e JOIN idp_accounts ia ON ia.account_id=e.account_id JOIN people p ON p.person_id=ia.person_id JOIN applications a ON a.application_id=e.application_id LEFT JOIN application_user_access u ON u.idp_account_id=e.account_id AND u.application_id=e.application_id WHERE u.access_id IS NULL AND p.employment_status='active' ORDER BY e.account_id, e.application_id LIMIT 10;",
+      "result_chars": 2443,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Return representative active SCIM access rows lacking any current IdP assignment.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, depth) AS ( SELECT member_id, group_id, 1 FROM idp_group_memberships WHERE member_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10 ), expected AS ( SELECT principal_id account_id, application_id FROM idp_app_assignments WHERE principal_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, x.application_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.revoked_at IS NULL ), pairs AS (SELECT DISTINCT account_id, application_id FROM expected) SELECT u.access_id, u.idp_account_id, u.application_id, a.name AS application_name, u.status, u.provisioning_source, p.person_id, p.employment_status, ia.status AS idp_status FROM application_user_access u JOIN applications a ON a.application_id=u.application_id JOIN idp_accounts ia ON ia.account_id=u.idp_account_id LEFT JOIN people p ON p.person_id=ia.person_id LEFT JOIN pairs q ON q.account_id=u.idp_account_id AND q.application_id=u.application_id WHERE u.status='active' AND u.provisioning_source='idp_scim' AND q.account_id IS NULL ORDER BY u.idp_account_id, u.application_id LIMIT 10;",
+      "result_chars": 2696,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Check coverage of revoked IdP account memberships by revoked application access.",
+      "sql": "WITH revoked_accounts AS (SELECT DISTINCT member_id account_id FROM idp_group_memberships WHERE member_type='account' AND revoked_at IS NOT NULL), app_summary AS (SELECT idp_account_id account_id, COUNT(*) total_rows, SUM(status='revoked' AND revoked_at IS NOT NULL) revoked_rows, SUM(status<>'revoked' OR revoked_at IS NULL) open_rows FROM application_user_access GROUP BY idp_account_id) SELECT COUNT(*) AS revoked_accounts, SUM(CASE WHEN s.account_id IS NULL THEN 1 ELSE 0 END) AS without_app_rows, SUM(CASE WHEN s.open_rows=0 AND s.revoked_rows=s.total_rows THEN 1 ELSE 0 END) AS all_app_rows_revoked, SUM(CASE WHEN s.open_rows>0 THEN 1 ELSE 0 END) AS with_open_app_rows FROM revoked_accounts r LEFT JOIN app_summary s ON s.account_id=r.account_id;",
+      "result_chars": 148,
+      "error": null
+    },
+    {
+      "step": 4,
+      "purpose": "Return representative revoked relationship IDs from each affected relationship table.",
+      "sql": "WITH rows AS ( SELECT 'idp_group_memberships' source, membership_id record_id, revoked_at, ROW_NUMBER() OVER (PARTITION BY 'idp_group_memberships' ORDER BY revoked_at DESC, membership_id) rn FROM idp_group_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'workspace_group_memberships', membership_id, revoked_at, ROW_NUMBER() OVER (PARTITION BY 'workspace_group_memberships' ORDER BY revoked_at DESC, membership_id) FROM workspace_group_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_org_memberships', membership_id, revoked_at, ROW_NUMBER() OVER (PARTITION BY 'github_org_memberships' ORDER BY revoked_at DESC, membership_id) FROM github_org_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'github_team_memberships', membership_id, revoked_at, ROW_NUMBER() OVER (PARTITION BY 'github_team_memberships' ORDER BY revoked_at DESC, membership_id) FROM github_team_memberships WHERE revoked_at IS NOT NULL UNION ALL SELECT 'application_user_access', access_id, revoked_at, ROW_NUMBER() OVER (PARTITION BY 'application_user_access' ORDER BY revoked_at DESC, access_id) FROM application_user_access WHERE revoked_at IS NOT NULL ) SELECT source, record_id, revoked_at FROM rows WHERE rn <= 2 ORDER BY source, revoked_at DESC;",
+      "result_chars": 1095,
+      "error": null
+    },
+    {
+      "step": 4,
+      "purpose": "Trace current group memberships behind the ended worker with revoked access but a current GitHub assignment.",
+      "sql": "WITH RECURSIVE account_groups(group_id, membership_id, via_group_id, depth) AS ( SELECT group_id, membership_id, NULL, 1 FROM idp_group_memberships WHERE member_type='account' AND member_id='idpa_001395' AND revoked_at IS NULL UNION SELECT m.group_id, m.membership_id, ag.group_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10 ) SELECT ag.membership_id, ag.group_id, g.name group_name, ag.via_group_id, ag.depth, x.assignment_id, x.application_id, a.name application_name, u.access_id, u.status access_status, p.person_id, p.employment_status, ia.status idp_status FROM account_groups ag JOIN idp_groups g ON g.group_id=ag.group_id LEFT JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.revoked_at IS NULL LEFT JOIN applications a ON a.application_id=x.application_id LEFT JOIN application_user_access u ON u.idp_account_id='idpa_001395' AND u.application_id=x.application_id JOIN idp_accounts ia ON ia.account_id='idpa_001395' JOIN people p ON p.person_id=ia.person_id WHERE x.assignment_id IS NOT NULL ORDER BY ag.depth;",
+      "result_chars": 434,
+      "error": null
+    },
+    {
+      "step": 4,
+      "purpose": "Summarize assignment-access reconciliation gaps by application.",
+      "sql": "WITH RECURSIVE account_groups(account_id, group_id, depth) AS ( SELECT member_id, group_id, 1 FROM idp_group_memberships WHERE member_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, m.group_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.revoked_at IS NULL WHERE ag.depth<10 ), expected AS ( SELECT principal_id account_id, application_id FROM idp_app_assignments WHERE principal_type='account' AND revoked_at IS NULL UNION SELECT ag.account_id, x.application_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.revoked_at IS NULL ), pairs AS (SELECT DISTINCT account_id, application_id FROM expected), issues AS ( SELECT 'expected_missing_row' issue, q.application_id FROM pairs q LEFT JOIN application_user_access u ON u.idp_account_id=q.account_id AND u.application_id=q.application_id WHERE u.access_id IS NULL UNION ALL SELECT 'active_scim_without_assignment', u.application_id FROM application_user_access u LEFT JOIN pairs q ON q.account_id=u.idp_account_id AND q.application_id=u.application_id WHERE u.status='active' AND u.provisioning_source='idp_scim' AND q.account_id IS NULL ) SELECT i.issue, a.application_id, a.name, COUNT(*) issue_count FROM issues i JOIN applications a ON a.application_id=i.application_id GROUP BY i.issue,a.application_id,a.name ORDER BY i.issue,issue_count DESC;",
+      "result_chars": 1508,
+      "error": null
+    }
+  ],
+  "other_tool_calls": [
+    {
+      "step": 0,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/identity_provider_repo.py"
+      },
+      "result_chars": 3154,
+      "error": null
+    }
+  ],
+  "report": {
+    "summary": "Revocation coverage is complete for the 66 affected IdP accounts, but application access reconciliation has major gaps: 1,894 expected rows are missing and 5,647 active SCIM rows lack current assignments.",
+    "findings": [
+      {
+        "title": "Revoked accounts fully closed",
+        "statement": "All 66 accounts with revoked direct IdP group relationships have application rows, and every such row is revoked; none remains open.",
+        "kind": "fact",
+        "evidence_ids": [
+          "idpm_008302",
+          "idpm_008303",
+          "aua_006625",
+          "aua_006626"
+        ]
+      },
+      {
+        "title": "Revocations span five datasets",
+        "statement": "Revocations appear in IdP and Workspace groups, GitHub organization and teams, and application access; other relationship tables have none.",
+        "kind": "fact",
+        "evidence_ids": [
+          "idpm_008302",
+          "gwm_002365",
+          "ghom_000387",
+          "ghtm_000599",
+          "aua_006625"
+        ]
+      },
+      {
+        "title": "Expected access rows missing",
+        "statement": "Current assignments produce 1,894 account-application pairs with no application access row, including 1,862 for active workers and two for ended workers.",
+        "kind": "fact",
+        "evidence_ids": [
+          "idpaa_000024",
+          "idpm_010171",
+          "idpaa_000014",
+          "idpm_010191",
+          "per_001941",
+          "idpaa_000008",
+          "idpm_010233",
+          "per_001942"
+        ]
+      },
+      {
+        "title": "SCIM assignment linkage absent",
+        "statement": "There are 5,647 active SCIM access rows without a current direct or nested IdP assignment, indicating assignment-record gaps or provisioning drift.",
+        "kind": "inference",
+        "evidence_ids": [
+          "aua_000002",
+          "aua_000001",
+          "aua_000008",
+          "aua_000005"
+        ]
+      },
+      {
+        "title": "Three assignment-state conflicts",
+        "statement": "Two prehires have suspended assigned access, while one ended worker retains a nested GitHub assignment despite revoked access and a deprovisioned IdP account.",
+        "kind": "fact",
+        "evidence_ids": [
+          "aua_004107",
+          "idpaa_000021",
+          "per_001038",
+          "aua_006161",
+          "idpaa_000025",
+          "per_001557",
+          "aua_005519",
+          "idpaa_000026",
+          "idpm_010248",
+          "per_001395"
+        ]
+      },
+      {
+        "title": "Revocation chronology is invalid",
+        "statement": "Twenty-two revoked application rows have revocation timestamps earlier than assignment timestamps, so their lifecycle history is internally inconsistent.",
+        "kind": "fact",
+        "evidence_ids": [
+          "aua_004784",
+          "aua_004785",
+          "aua_000245",
+          "aua_001718",
+          "aua_007981",
+          "aua_004049"
+        ]
+      }
+    ],
+    "data_gaps": [
+      "No matching revocation or deprovisioning audit event types were found, and audit history is incomplete, so the cause of reconciliation gaps cannot be confirmed."
+    ],
+    "recommended_actions": [
+      "Validate the 1,894 expected-but-missing application rows, prioritizing the two ended workers with active IdP accounts.",
+      "Reconcile the 5,647 active SCIM rows against the IdP assignment export and document applications provisioned outside these assignment records.",
+      "Remove or justify the ended worker\u2019s lingering nested GitHub group assignment.",
+      "Correct the 22 application lifecycle records whose revocation predates assignment.",
+      "Review the two suspended prehire access rows before their start dates."
+    ],
+    "proposed_tools": [
+      {
+        "name": "list_revoked_relationships",
+        "description": "Lists revoked relationships across supported systems through a supplied snapshot time, returning the record IDs needed for evidence.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Snapshot timestamp through which revocations should be included."
+          }
+        ],
+        "sql": "SELECT 'idp_group_membership' AS relationship_type, membership_id AS record_id, member_type AS subject_type, member_id AS subject_id, group_id AS object_id, revoked_at FROM idp_group_memberships WHERE revoked_at IS NOT NULL AND revoked_at <= :snapshot_at UNION ALL SELECT 'workspace_group_membership', membership_id, member_type, member_id, group_id, revoked_at FROM workspace_group_memberships WHERE revoked_at IS NOT NULL AND revoked_at <= :snapshot_at UNION ALL SELECT 'github_org_membership', membership_id, 'account', account_id, 'organization', revoked_at FROM github_org_memberships WHERE revoked_at IS NOT NULL AND revoked_at <= :snapshot_at UNION ALL SELECT 'github_team_membership', membership_id, 'account', account_id, team_id, revoked_at FROM github_team_memberships WHERE revoked_at IS NOT NULL AND revoked_at <= :snapshot_at UNION ALL SELECT 'application_user_access', access_id, 'idp_account', idp_account_id, application_id, revoked_at FROM application_user_access WHERE revoked_at IS NOT NULL AND revoked_at <= :snapshot_at ORDER BY revoked_at DESC",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          1,
+          2
+        ],
+        "validation": "ok: 500+ rows"
+      },
+      {
+        "name": "reconcile_idp_assignments_to_app_access",
+        "description": "Compares current direct and nested IdP assignments with application-reported access and returns missing or non-active access rows with evidence IDs.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Timestamp used to determine which memberships and assignments are current."
+          }
+        ],
+        "sql": "WITH RECURSIVE account_groups(account_id, group_id, membership_id, depth) AS ( SELECT member_id, group_id, membership_id, 1 FROM idp_group_memberships WHERE member_type='account' AND granted_at <= :snapshot_at AND (revoked_at IS NULL OR revoked_at > :snapshot_at) UNION SELECT ag.account_id, m.group_id, m.membership_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.granted_at <= :snapshot_at AND (m.revoked_at IS NULL OR m.revoked_at > :snapshot_at) WHERE ag.depth<10 ), expected AS ( SELECT assignment_id, principal_id AS account_id, application_id, NULL AS membership_id FROM idp_app_assignments WHERE principal_type='account' AND granted_at <= :snapshot_at AND (revoked_at IS NULL OR revoked_at > :snapshot_at) UNION ALL SELECT x.assignment_id, ag.account_id, x.application_id, ag.membership_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.granted_at <= :snapshot_at AND (x.revoked_at IS NULL OR x.revoked_at > :snapshot_at) ), pairs AS ( SELECT account_id, application_id, MIN(assignment_id) AS assignment_id, MIN(membership_id) AS membership_id FROM expected GROUP BY account_id, application_id ) SELECT CASE WHEN u.access_id IS NULL THEN 'missing_access_row' ELSE 'access_not_active' END AS issue, p.assignment_id, p.membership_id, p.account_id, p.application_id, u.access_id, u.status, u.revoked_at FROM pairs p LEFT JOIN application_user_access u ON u.idp_account_id=p.account_id AND u.application_id=p.application_id WHERE u.access_id IS NULL OR u.status<>'active' ORDER BY issue, p.account_id, p.application_id",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          3,
+          5
+        ],
+        "validation": "ok: 500+ rows"
+      },
+      {
+        "name": "find_active_scim_without_assignment",
+        "description": "Finds active SCIM-provisioned application access without a current direct or nested IdP assignment.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Timestamp used to determine current memberships and assignments."
+          }
+        ],
+        "sql": "WITH RECURSIVE account_groups(account_id, group_id, depth) AS ( SELECT member_id, group_id, 1 FROM idp_group_memberships WHERE member_type='account' AND granted_at <= :snapshot_at AND (revoked_at IS NULL OR revoked_at > :snapshot_at) UNION SELECT ag.account_id, m.group_id, ag.depth+1 FROM account_groups ag JOIN idp_group_memberships m ON m.member_type='group' AND m.member_id=ag.group_id AND m.granted_at <= :snapshot_at AND (m.revoked_at IS NULL OR m.revoked_at > :snapshot_at) WHERE ag.depth<10 ), expected AS ( SELECT principal_id AS account_id, application_id FROM idp_app_assignments WHERE principal_type='account' AND granted_at <= :snapshot_at AND (revoked_at IS NULL OR revoked_at > :snapshot_at) UNION SELECT ag.account_id, x.application_id FROM account_groups ag JOIN idp_app_assignments x ON x.principal_type='group' AND x.principal_id=ag.group_id AND x.granted_at <= :snapshot_at AND (x.revoked_at IS NULL OR x.revoked_at > :snapshot_at) ), pairs AS (SELECT DISTINCT account_id, application_id FROM expected) SELECT u.access_id, u.idp_account_id, u.application_id, u.status, u.provisioning_source, ia.person_id FROM application_user_access u JOIN idp_accounts ia ON ia.account_id=u.idp_account_id LEFT JOIN pairs p ON p.account_id=u.idp_account_id AND p.application_id=u.application_id WHERE u.status='active' AND u.provisioning_source='idp_scim' AND p.account_id IS NULL ORDER BY u.idp_account_id, u.application_id",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          4
+        ],
+        "validation": "ok: 500+ rows"
+      },
+      {
+        "name": "find_invalid_application_access_timestamps",
+        "description": "Returns application access rows whose revocation predates assignment or whose activity timestamps are after the snapshot.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Snapshot timestamp used to detect future activity."
+          }
+        ],
+        "sql": "SELECT access_id, idp_account_id, application_id, assigned_at, revoked_at, last_authenticated_at, last_mfa_at, CASE WHEN revoked_at IS NOT NULL AND revoked_at < assigned_at THEN 'revoked_before_assigned' WHEN last_authenticated_at IS NOT NULL AND last_authenticated_at > :snapshot_at THEN 'authentication_after_snapshot' WHEN last_mfa_at IS NOT NULL AND last_authenticated_at IS NOT NULL AND last_mfa_at > last_authenticated_at THEN 'mfa_after_last_authentication' END AS issue FROM application_user_access WHERE (revoked_at IS NOT NULL AND revoked_at < assigned_at) OR (last_authenticated_at IS NOT NULL AND last_authenticated_at > :snapshot_at) OR (last_mfa_at IS NOT NULL AND last_authenticated_at IS NOT NULL AND last_mfa_at > last_authenticated_at) ORDER BY access_id",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          6
+        ],
+        "validation": "ok: 22 rows"
+      }
+    ]
+  }
+}

@@ -40,6 +40,29 @@ class GoogleWorkspaceRepo:
         sql = "SELECT grant_id, application_name, scopes_json, granted_at, last_used_at FROM workspace_oauth_grants WHERE account_id = ? AND revoked_at IS NULL"
         return self.db.query(sql, (account_id,))
 
+    def get_direct_drive_permissions_of_ended_people(self, snapshot_at: str, person_id: str | None = None) -> list[dict[str, Any]]:
+        """Unrevoked, unexpired Drive permissions granted directly to the Workspace account of someone marked ended."""
+        sql = """
+            SELECT w.person_id, w.account_id, w.status AS account_status, p.permission_id, p.role, p.granted_at,
+                   r.resource_id, r.name AS resource_name, r.classification
+            FROM people pe JOIN workspace_accounts w ON w.person_id = pe.person_id
+            JOIN drive_permissions p ON p.principal_type = 'account' AND p.principal_id = w.account_id
+            JOIN drive_resources r ON r.resource_id = p.resource_id
+            WHERE pe.employment_status = 'ended' AND (:person_id IS NULL OR pe.person_id = :person_id)
+              AND p.revoked_at IS NULL AND (p.expires_at IS NULL OR p.expires_at > :snapshot_at)
+            ORDER BY w.person_id, r.name
+        """
+        return self.db.query(sql, {"snapshot_at": snapshot_at, "person_id": person_id})
+
+    def get_oauth_grants_of_ended_people(self, person_id: str | None = None) -> list[dict[str, Any]]:
+        sql = """
+            SELECT w.person_id, w.account_id, w.status AS account_status, g.grant_id, g.application_name, g.granted_at, g.last_used_at
+            FROM people pe JOIN workspace_accounts w ON w.person_id = pe.person_id JOIN workspace_oauth_grants g ON g.account_id = w.account_id
+            WHERE pe.employment_status = 'ended' AND (:person_id IS NULL OR pe.person_id = :person_id) AND g.revoked_at IS NULL
+            ORDER BY w.person_id, g.application_name
+        """
+        return self.db.query(sql, {"person_id": person_id})
+
     def get_owned_resources(self, account_id: str) -> list[dict[str, Any]]:
         sql = "SELECT resource_id, name AS resource_name, resource_type, classification FROM drive_resources WHERE owner_account_id = ? ORDER BY name"
         return self.db.query(sql, (account_id,))

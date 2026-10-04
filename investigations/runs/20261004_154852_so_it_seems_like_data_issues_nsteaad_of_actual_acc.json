@@ -1,0 +1,7 @@
+{
+  "question": "so it seems like data issues nsteaad of actual access issues?",
+  "model": "openai/gpt-5.6-sol",
+  "queries": [],
+  "other_tool_calls": [],
+  "report": "Yes\u2014**the confirmed problems are mostly data consistency issues, not confirmed live-access failures**.\n\n- All 66 accounts tied to revoked IdP memberships had every application-access row revoked; none remained open. [idpm_008302, idpm_008303, aua_006625, aua_006626]\n- The clearest defects are 22 impossible timelines where access was revoked before it was assigned. [aua_004784, aua_000245, aua_001718]\n- The large assignment mismatches may reflect incomplete exports or provisioning drift, so they do **not** by themselves prove inappropriate access. [idpaa_000024, idpm_010171, aua_000002]\n- There are still items worth validating: two ended workers have active IdP accounts and current Salesforce assignments, although no application-access row exists. [per_001941, idpaa_000014, per_001942, idpaa_000008]\n- Another ended worker retains a nested GitHub assignment, but their IdP account and application access are already deprovisioned/revoked. This is configuration cleanup, not evidence of usable GitHub access. [per_001395, idpm_010248, idpaa_000026, aua_005519]\n\nSo: **no confirmed residual application access from the revoked relationships**, but reconciliation and cleanup are needed."
+}

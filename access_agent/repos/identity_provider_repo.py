@@ -16,6 +16,16 @@ WITH RECURSIVE account_groups(group_id, membership_id, via_group_id, depth) AS (
 )
 """
 
+ALL_ACCOUNT_GROUPS_CTE = f"""
+WITH RECURSIVE all_account_groups(account_id, group_id, depth) AS (
+    SELECT member_id, group_id, 1 FROM idp_group_memberships WHERE member_type = 'account' AND revoked_at IS NULL
+    UNION
+    SELECT aag.account_id, m.group_id, aag.depth + 1 FROM all_account_groups aag
+    JOIN idp_group_memberships m ON m.member_type = 'group' AND m.member_id = aag.group_id AND m.revoked_at IS NULL
+    WHERE aag.depth < {MAX_NESTING_DEPTH}
+)
+"""
+
 
 class IdentityProviderRepo:
     def __init__(self, db: Database | None = None):
@@ -56,3 +66,38 @@ class IdentityProviderRepo:
             )
         """
         return self.db.query(sql, {"account_id": account_id})
+
+    def get_assigned_app_pairs(self, application_name: str | None = None) -> list[dict[str, Any]]:
+        """Every account-application pair a current assignment reaches (directly or through nested groups), joined to what the
+        application reports. access_id is NULL when the application has no row for that account."""
+        sql = ALL_ACCOUNT_GROUPS_CTE + """, assigned AS (
+                SELECT account_id, application_id, MIN(assignment_id) AS assignment_id FROM (
+                    SELECT aag.account_id, x.application_id, x.assignment_id FROM all_account_groups aag
+                    JOIN idp_app_assignments x ON x.principal_type = 'group' AND x.principal_id = aag.group_id AND x.revoked_at IS NULL
+                    UNION ALL
+                    SELECT principal_id, application_id, assignment_id FROM idp_app_assignments WHERE principal_type = 'account' AND revoked_at IS NULL
+                ) GROUP BY account_id, application_id
+            )
+            SELECT s.account_id, a.status AS account_status, a.person_id, p.full_name, p.employment_status,
+                   s.application_id, ap.name AS application_name, s.assignment_id, u.access_id, u.status AS access_status
+            FROM assigned s
+            JOIN idp_accounts a ON a.account_id = s.account_id
+            LEFT JOIN people p ON p.person_id = a.person_id
+            JOIN applications ap ON ap.application_id = s.application_id
+            LEFT JOIN application_user_access u ON u.idp_account_id = s.account_id AND u.application_id = s.application_id
+            WHERE :application_name IS NULL OR ap.name = :application_name COLLATE NOCASE
+            ORDER BY ap.name, s.account_id
+        """
+        return self.db.query(sql, {"application_name": application_name})
+
+    def get_accounts_deactivated_before_created(self) -> list[dict[str, Any]]:
+        sql = "SELECT account_id, person_id, username, status, created_at, deactivated_at FROM idp_accounts WHERE deactivated_at < created_at ORDER BY account_id"
+        return self.db.query(sql)
+
+    def get_app_access_revoked_before_assigned(self) -> list[dict[str, Any]]:
+        sql = """
+            SELECT u.access_id, u.idp_account_id, a.person_id, ap.name AS application_name, u.assigned_at, u.revoked_at
+            FROM application_user_access u JOIN idp_accounts a ON a.account_id = u.idp_account_id JOIN applications ap ON ap.application_id = u.application_id
+            WHERE u.revoked_at < u.assigned_at ORDER BY u.idp_account_id, ap.name
+        """
+        return self.db.query(sql)

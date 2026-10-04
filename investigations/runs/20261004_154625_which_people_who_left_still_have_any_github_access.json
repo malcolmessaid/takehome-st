@@ -1,0 +1,230 @@
+{
+  "question": "Which people who left still have any GitHub access, and are there active GitHub accounts not linked to anyone?",
+  "model": "openai/gpt-5.6-sol",
+  "queries": [
+    {
+      "step": 0,
+      "purpose": "Count former people and active unlinked GitHub accounts.",
+      "sql": "SELECT (SELECT COUNT(*) FROM people WHERE employment_status = 'ended') AS ended_people, (SELECT COUNT(*) FROM github_accounts WHERE status = 'active' AND person_id IS NULL) AS active_unlinked_github_accounts;",
+      "result_chars": 106,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "List former people with active GitHub accounts or current organization, team, or direct repository grants.",
+      "sql": "SELECT p.person_id, p.full_name, p.primary_email, p.end_date, ga.account_id, ga.login, ga.status AS account_status, ga.last_active_at, COUNT(DISTINCT CASE WHEN gom.revoked_at IS NULL THEN gom.membership_id END) AS current_org_memberships, COUNT(DISTINCT CASE WHEN gtm.revoked_at IS NULL THEN gtm.membership_id END) AS current_team_memberships, COUNT(DISTINCT CASE WHEN grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > '2026-08-15T12:00:00Z') THEN grc.permission_id END) AS current_direct_repo_grants FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id LEFT JOIN github_org_memberships gom ON gom.account_id = ga.account_id LEFT JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id LEFT JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id WHERE p.employment_status = 'ended' GROUP BY p.person_id, p.full_name, p.primary_email, p.end_date, ga.account_id, ga.login, ga.status, ga.last_active_at HAVING ga.status = 'active' OR current_org_memberships > 0 OR current_team_memberships > 0 OR current_direct_repo_grants > 0 ORDER BY p.end_date, p.full_name;",
+      "result_chars": 4554,
+      "error": null
+    },
+    {
+      "step": 1,
+      "purpose": "List active GitHub accounts that are not linked to an HR person and their current grants.",
+      "sql": "SELECT ga.account_id, ga.login, ga.email, ga.account_type, ga.status, ga.last_active_at, COUNT(DISTINCT CASE WHEN gom.revoked_at IS NULL THEN gom.membership_id END) AS current_org_memberships, COUNT(DISTINCT CASE WHEN gtm.revoked_at IS NULL THEN gtm.membership_id END) AS current_team_memberships, COUNT(DISTINCT CASE WHEN grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > '2026-08-15T12:00:00Z') THEN grc.permission_id END) AS current_direct_repo_grants FROM github_accounts ga LEFT JOIN github_org_memberships gom ON gom.account_id = ga.account_id LEFT JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id LEFT JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id WHERE ga.status = 'active' AND ga.person_id IS NULL GROUP BY ga.account_id, ga.login, ga.email, ga.account_type, ga.status, ga.last_active_at ORDER BY ga.login;",
+      "result_chars": 332,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Show current GitHub access paths and repositories for former people.",
+      "sql": "SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ga.login, ga.status AS account_status, 'organization' AS access_path, gom.membership_id AS access_record_id, NULL AS repository_id, NULL AS repository_name, gom.org_role AS access_level, gom.source AS grant_source FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE p.employment_status = 'ended' UNION ALL SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ga.login, ga.status, 'team_repository', gtrp.permission_id, r.repository_id, r.name, gtrp.permission, gtm.membership_id FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories r ON r.repository_id = gtrp.repository_id WHERE p.employment_status = 'ended' UNION ALL SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ga.login, ga.status, 'direct_repository', grc.permission_id, r.repository_id, r.name, grc.permission, COALESCE(grc.approval_reference, '') FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > '2026-08-15T12:00:00Z') JOIN github_repositories r ON r.repository_id = grc.repository_id WHERE p.employment_status = 'ended' ORDER BY full_name, access_path, repository_name;",
+      "result_chars": 11257,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Show all current access records for active GitHub accounts not linked to a person.",
+      "sql": "SELECT ga.account_id, ga.login, ga.account_type, ga.status, 'organization' AS access_path, gom.membership_id AS access_record_id, NULL AS repository_id, NULL AS repository_name, gom.org_role AS access_level FROM github_accounts ga JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE ga.status = 'active' AND ga.person_id IS NULL UNION ALL SELECT ga.account_id, ga.login, ga.account_type, ga.status, 'team_repository', gtrp.permission_id, r.repository_id, r.name, gtrp.permission FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories r ON r.repository_id = gtrp.repository_id WHERE ga.status = 'active' AND ga.person_id IS NULL UNION ALL SELECT ga.account_id, ga.login, ga.account_type, ga.status, 'direct_repository', grc.permission_id, r.repository_id, r.name, grc.permission FROM github_accounts ga JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > '2026-08-15T12:00:00Z') JOIN github_repositories r ON r.repository_id = grc.repository_id WHERE ga.status = 'active' AND ga.person_id IS NULL ORDER BY access_path, repository_name;",
+      "result_chars": 564,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Find successful GitHub activity after former employees' end dates.",
+      "sql": "SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ae.event_id, ae.occurred_at, ae.event_type, ae.actor_type, ae.actor_id, ae.target_type, ae.target_id, ae.source, ae.outcome FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN audit_events ae ON ae.system = 'github' AND ae.actor_type = 'account' AND ae.actor_id = ga.account_id WHERE p.employment_status = 'ended' AND ae.outcome = 'success' AND ae.occurred_at >= p.end_date || 'T00:00:00Z' ORDER BY ae.occurred_at DESC;",
+      "result_chars": 4483,
+      "error": null
+    }
+  ],
+  "other_tool_calls": [
+    {
+      "step": 0,
+      "tool": "read_code",
+      "arguments": {
+        "path": null
+      },
+      "result_chars": 1450,
+      "error": null
+    },
+    {
+      "step": 1,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/github_repo.py"
+      },
+      "result_chars": 2972,
+      "error": null
+    }
+  ],
+  "report": {
+    "summary": "Yes. Thirteen former workers retain GitHub grants; three accounts remain active. One active service account is unlinked to any person, and two former-worker accounts show post-departure activity.",
+    "findings": [
+      {
+        "title": "Three former accounts active",
+        "statement": "Ariel Chen, Rowan Mercer, and Talia Brooks have active accounts, current organization membership, and repository access after leaving.",
+        "kind": "fact",
+        "evidence_ids": [
+          "per_001945",
+          "gha_001945",
+          "ghom_000897",
+          "per_001941",
+          "gha_001941",
+          "ghom_000893",
+          "per_001942",
+          "gha_001942",
+          "ghom_000894",
+          "ghrp_000121"
+        ]
+      },
+      {
+        "title": "Ten suspended accounts retain grants",
+        "statement": "Casey Cohen, Felix Garcia, Hugo Clark, Jae Thomas, Jonah Anders, Kai Mercer, Luis Kaur, Mateo Miller, Parker Choi, and Priya Petrov retain grants.",
+        "kind": "fact",
+        "evidence_ids": [
+          "per_000682",
+          "ghrp_000137",
+          "per_001891",
+          "ghrp_000120",
+          "per_001240",
+          "ghrp_000107",
+          "per_001643",
+          "ghrp_000115",
+          "per_000589",
+          "ghrp_000094",
+          "per_002046",
+          "ghrp_000041",
+          "per_001395",
+          "ghtm_000998",
+          "per_000341",
+          "ghrp_000089",
+          "per_000093",
+          "ghrp_000084",
+          "per_001550",
+          "ghrp_000072"
+        ]
+      },
+      {
+        "title": "Post-departure activity recorded",
+        "statement": "Rowan Mercer\u2019s account pushed on August 14; Talia Brooks\u2019s account fetched on August 13 and had other successful post-departure actions.",
+        "kind": "fact",
+        "evidence_ids": [
+          "evt_00048004",
+          "gha_001941",
+          "per_001941",
+          "evt_00048007",
+          "evt_00015919",
+          "evt_00031434",
+          "gha_001942",
+          "per_001942"
+        ]
+      },
+      {
+        "title": "Active unlinked service account",
+        "statement": "The active unlinked legacy-release-bot service account is an organization member with write access to payments-api and was active August 14.",
+        "kind": "fact",
+        "evidence_ids": [
+          "gha_900001",
+          "ghom_000946",
+          "ghrp_000143",
+          "ghr_000001"
+        ]
+      },
+      {
+        "title": "Suspension limits practical use",
+        "statement": "The ten suspended accounts likely cannot authenticate, but their unrevoked grants remain configured and could matter if account status changes.",
+        "kind": "inference",
+        "evidence_ids": [
+          "gha_000682",
+          "gha_001891",
+          "gha_001240",
+          "gha_001643",
+          "gha_000589",
+          "gha_002046",
+          "gha_001395",
+          "gha_000341",
+          "gha_000093",
+          "gha_001550"
+        ]
+      }
+    ],
+    "data_gaps": [
+      "Audit logs are incomplete, and account-attributed events do not prove which human performed an action."
+    ],
+    "recommended_actions": [
+      "Immediately suspend the three active former-worker accounts and revoke their organization, team, and direct repository grants.",
+      "Investigate Rowan Mercer\u2019s and Talia Brooks\u2019s post-departure activity and preserve relevant GitHub logs.",
+      "Remove residual grants from the ten suspended former-worker accounts.",
+      "Identify an owner and business need for legacy-release-bot; rotate its credentials and remove unnecessary access."
+    ],
+    "proposed_tools": [
+      {
+        "name": "get_former_people_current_github_access",
+        "description": "Find former people whose GitHub accounts retain current organization, team-repository, or direct repository access. Returns person, account, grant, membership, and repository IDs for citation.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Snapshot timestamp used to exclude expired direct collaborator grants."
+          }
+        ],
+        "sql": "SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ga.login, ga.status AS account_status, 'organization' AS access_path, gom.membership_id AS access_record_id, NULL AS membership_id, NULL AS repository_id, NULL AS repository_name, gom.org_role AS access_level FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE p.employment_status = 'ended' UNION ALL SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ga.login, ga.status, 'team_repository', gtrp.permission_id, gtm.membership_id, r.repository_id, r.name, gtrp.permission FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories r ON r.repository_id = gtrp.repository_id WHERE p.employment_status = 'ended' UNION ALL SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ga.login, ga.status, 'direct_repository', grc.permission_id, NULL, r.repository_id, r.name, grc.permission FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > :snapshot_at) JOIN github_repositories r ON r.repository_id = grc.repository_id WHERE p.employment_status = 'ended' ORDER BY full_name, access_path, repository_name",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          1,
+          2,
+          5
+        ],
+        "validation": "ok: 31 rows"
+      },
+      {
+        "name": "get_active_unlinked_github_access",
+        "description": "List active GitHub accounts with no matched person and their current organization, team-repository, and direct repository grants.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Snapshot timestamp used to exclude expired direct collaborator grants."
+          }
+        ],
+        "sql": "SELECT ga.account_id, ga.login, ga.email, ga.account_type, ga.status, 'organization' AS access_path, gom.membership_id AS access_record_id, NULL AS membership_id, NULL AS repository_id, NULL AS repository_name, gom.org_role AS access_level FROM github_accounts ga JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE ga.status = 'active' AND ga.person_id IS NULL UNION ALL SELECT ga.account_id, ga.login, ga.email, ga.account_type, ga.status, 'team_repository', gtrp.permission_id, gtm.membership_id, r.repository_id, r.name, gtrp.permission FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories r ON r.repository_id = gtrp.repository_id WHERE ga.status = 'active' AND ga.person_id IS NULL UNION ALL SELECT ga.account_id, ga.login, ga.email, ga.account_type, ga.status, 'direct_repository', grc.permission_id, NULL, r.repository_id, r.name, grc.permission FROM github_accounts ga JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > :snapshot_at) JOIN github_repositories r ON r.repository_id = grc.repository_id WHERE ga.status = 'active' AND ga.person_id IS NULL ORDER BY login, access_path, repository_name",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          4
+        ],
+        "validation": "ok: 2 rows"
+      },
+      {
+        "name": "get_github_activity_after_departure",
+        "description": "Find successful GitHub events attributed to former workers\u2019 accounts after their HR end date and through the snapshot.",
+        "parameters": [
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Upper timestamp bound for audit events."
+          }
+        ],
+        "sql": "SELECT p.person_id, p.full_name, p.end_date, ga.account_id, ae.event_id, ae.occurred_at, ae.event_type, ae.actor_type, ae.actor_id, ae.target_type, ae.target_id, ae.source, ae.outcome FROM people p JOIN github_accounts ga ON ga.person_id = p.person_id JOIN audit_events ae ON ae.system = 'github' AND ae.actor_type = 'account' AND ae.actor_id = ga.account_id WHERE p.employment_status = 'ended' AND ae.outcome = 'success' AND ae.occurred_at >= p.end_date || 'T00:00:00Z' AND ae.occurred_at <= :snapshot_at ORDER BY ae.occurred_at DESC",
+        "example_args": {
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          3
+        ],
+        "validation": "ok: 12 rows"
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ import textwrap
 
 from access_agent.agent_service import AgentService
 from access_agent.logger import Verbosity, configure_logging
+from access_agent.models.proposed_tool import SqlInvestigationReport
 from access_agent.models.report import InvestigationReport
 from access_agent.sql_agent_service import SqlAgentService
 
@@ -38,6 +39,14 @@ def print_report(report: InvestigationReport) -> None:
         print(wrap(action, "     ", f"  {i}. "))
 
 
+def print_proposed_tools(report: SqlInvestigationReport) -> None:
+    print(f"\n{BOLD}PROPOSED TOOLS{RESET}")
+    for i, tool in enumerate(report.proposed_tools, 1):
+        params = ", ".join(f"{p.name}: {p.type}" for p in tool.parameters)
+        print(f"\n  {i}. {BOLD}{tool.name}{RESET}({params})  [{tool.validation}]\n{wrap(tool.description, '     ')}")
+        print(f"{DIM}     supports findings: {', '.join(map(str, tool.supports_findings)) or 'none'}{RESET}")
+
+
 def print_credit(agent: AgentService) -> None:
     try:
         remaining, limit = agent.llm.get_credit_remaining()
@@ -68,6 +77,10 @@ def main() -> None:
                 print_report(result)
             else:
                 print(f"\nagent> {result}")
+            if isinstance(result, SqlInvestigationReport):
+                print_proposed_tools(result)
+            if isinstance(agent, SqlAgentService) and agent.last_run_path:
+                print(f"\n{DIM}Queries and report saved to {agent.last_run_path}{RESET}")
     except (EOFError, KeyboardInterrupt):
         print()
 

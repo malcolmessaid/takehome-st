@@ -1,0 +1,200 @@
+{
+  "question": "Which active accounts in any system are not linked to a person, and what privileged or production access do they have?",
+  "model": "openai/gpt-5.6-sol",
+  "queries": [
+    {
+      "step": 0,
+      "purpose": "Count active unmatched accounts by system.",
+      "sql": "SELECT system, COUNT(*) AS active_unmatched_accounts FROM (SELECT 'idp' AS system, account_id FROM idp_accounts WHERE person_id IS NULL AND status = 'active' UNION ALL SELECT 'workspace', account_id FROM workspace_accounts WHERE person_id IS NULL AND status = 'active' UNION ALL SELECT 'github', account_id FROM github_accounts WHERE person_id IS NULL AND status = 'active') GROUP BY system ORDER BY system",
+      "result_chars": 100,
+      "error": null
+    },
+    {
+      "step": 0,
+      "purpose": "List active unmatched account identifiers and recent activity.",
+      "sql": "SELECT 'idp' AS system, account_id, username AS account_name, NULL AS account_type, last_login_at AS last_activity_at FROM idp_accounts WHERE person_id IS NULL AND status = 'active' UNION ALL SELECT 'workspace', account_id, primary_email, NULL, last_login_at FROM workspace_accounts WHERE person_id IS NULL AND status = 'active' UNION ALL SELECT 'github', account_id, login, account_type, last_active_at FROM github_accounts WHERE person_id IS NULL AND status = 'active' ORDER BY system, account_name",
+      "result_chars": 205,
+      "error": null
+    },
+    {
+      "step": 2,
+      "purpose": "Check current GitHub organization and team roles for the unmatched account.",
+      "sql": "SELECT ga.account_id, ga.login, 'organization' AS scope_type, gom.membership_id AS grant_id, NULL AS scope_id, NULL AS scope_name, gom.org_role AS role, gom.source, gom.granted_at FROM github_accounts ga JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE ga.person_id IS NULL AND ga.status = 'active' UNION ALL SELECT ga.account_id, ga.login, 'team', gtm.membership_id, gt.team_id, gt.name, gtm.role, gtm.source, gtm.granted_at FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_teams gt ON gt.team_id = gtm.team_id WHERE ga.person_id IS NULL AND ga.status = 'active' ORDER BY account_id, scope_type, scope_name",
+      "result_chars": 92,
+      "error": "OperationalError: 1st ORDER BY term does not match any column in the result set"
+    },
+    {
+      "step": 2,
+      "purpose": "Find current direct and team repository access for active unmatched GitHub accounts.",
+      "sql": "SELECT ga.account_id, ga.login, 'direct' AS access_path, grc.permission_id, NULL AS membership_id, gr.repository_id, gr.name AS repository_name, gr.sensitivity, gr.visibility, gr.archived, grc.permission, grc.approval_reference, grc.granted_at, grc.expires_at FROM github_accounts ga JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > '2026-08-15T12:00:00Z') JOIN github_repositories gr ON gr.repository_id = grc.repository_id WHERE ga.person_id IS NULL AND ga.status = 'active' UNION ALL SELECT ga.account_id, ga.login, 'team', gtrp.permission_id, gtm.membership_id, gr.repository_id, gr.name, gr.sensitivity, gr.visibility, gr.archived, gtrp.permission, NULL, gtrp.granted_at, NULL FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories gr ON gr.repository_id = gtrp.repository_id WHERE ga.person_id IS NULL AND ga.status = 'active' ORDER BY account_id, repository_name, access_path",
+      "result_chars": 92,
+      "error": "OperationalError: 1st ORDER BY term does not match any column in the result set"
+    },
+    {
+      "step": 2,
+      "purpose": "Check recent audit events involving active unmatched GitHub accounts.",
+      "sql": "SELECT ae.event_id, ae.occurred_at, ae.system, ae.event_type, ae.actor_type, ae.actor_id, ae.target_type, ae.target_id, ae.source, ae.outcome, ae.details_json FROM audit_events ae JOIN github_accounts ga ON (ae.actor_type = 'account' AND ae.actor_id = ga.account_id) OR (ae.target_type = 'account' AND ae.target_id = ga.account_id) WHERE ga.person_id IS NULL AND ga.status = 'active' ORDER BY ae.occurred_at DESC LIMIT 50",
+      "result_chars": 5285,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Check current GitHub organization and team roles for active unmatched accounts.",
+      "sql": "SELECT * FROM (SELECT ga.account_id AS account_id, ga.login AS login, 'organization' AS scope_type, gom.membership_id AS grant_id, NULL AS scope_id, NULL AS scope_name, gom.org_role AS role, gom.source AS source, gom.granted_at AS granted_at FROM github_accounts ga JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE ga.person_id IS NULL AND ga.status = 'active' UNION ALL SELECT ga.account_id, ga.login, 'team', gtm.membership_id, gt.team_id, gt.name, gtm.role, gtm.source, gtm.granted_at FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_teams gt ON gt.team_id = gtm.team_id WHERE ga.person_id IS NULL AND ga.status = 'active') x ORDER BY account_id, scope_type, scope_name",
+      "result_chars": 278,
+      "error": null
+    },
+    {
+      "step": 3,
+      "purpose": "Find current direct and team repository access for active unmatched GitHub accounts.",
+      "sql": "SELECT * FROM (SELECT ga.account_id AS account_id, ga.login AS login, 'direct' AS access_path, grc.permission_id AS permission_id, NULL AS membership_id, gr.repository_id AS repository_id, gr.name AS repository_name, gr.sensitivity AS sensitivity, gr.visibility AS visibility, gr.archived AS archived, grc.permission AS permission, grc.approval_reference AS approval_reference, grc.granted_at AS granted_at, grc.expires_at AS expires_at FROM github_accounts ga JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > '2026-08-15T12:00:00Z') JOIN github_repositories gr ON gr.repository_id = grc.repository_id WHERE ga.person_id IS NULL AND ga.status = 'active' UNION ALL SELECT ga.account_id, ga.login, 'team', gtrp.permission_id, gtm.membership_id, gr.repository_id, gr.name, gr.sensitivity, gr.visibility, gr.archived, gtrp.permission, NULL, gtrp.granted_at, NULL FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories gr ON gr.repository_id = gtrp.repository_id WHERE ga.person_id IS NULL AND ga.status = 'active') x ORDER BY account_id, repository_name, access_path",
+      "result_chars": 447,
+      "error": null
+    }
+  ],
+  "other_tool_calls": [
+    {
+      "step": 1,
+      "tool": "read_code",
+      "arguments": {
+        "path": "access_agent/repos/github_repo.py"
+      },
+      "result_chars": 2972,
+      "error": null
+    }
+  ],
+  "report": {
+    "summary": "One active account is unlinked: GitHub service account legacy-release-bot. It has direct write access to the private, production-critical payments-api repository and pushed there hours before the snapshot.",
+    "findings": [
+      {
+        "title": "Production write access",
+        "statement": "legacy-release-bot has unexpired direct write access to the private, production-critical payments-api repository.",
+        "kind": "fact",
+        "evidence_ids": [
+          "ghrp_000143",
+          "ghr_000001",
+          "gha_900001"
+        ]
+      },
+      {
+        "title": "One unmatched active account",
+        "statement": "The only active account without a person link is GitHub service account legacy-release-bot; none appear in IdP or Workspace.",
+        "kind": "fact",
+        "evidence_ids": [
+          "gha_900001"
+        ]
+      },
+      {
+        "title": "Access is actively used",
+        "statement": "legacy-release-bot successfully pushed three commits to payments-api on 2026-08-14, about 12 hours before the snapshot.",
+        "kind": "fact",
+        "evidence_ids": [
+          "evt_00048017",
+          "gha_900001",
+          "ghr_000001"
+        ]
+      },
+      {
+        "title": "Manual organization membership",
+        "statement": "legacy-release-bot is a manually granted GitHub organization member dating from 2023-02-14, but it is not an organization owner.",
+        "kind": "fact",
+        "evidence_ids": [
+          "ghom_000946",
+          "gha_900001"
+        ]
+      }
+    ],
+    "data_gaps": [
+      "A NULL person link does not identify the service account\u2019s human owner, and the snapshot has no service-account ownership registry.",
+      "Audit logs are incomplete, so the recent push proves account activity but not which human or process used its credentials."
+    ],
+    "recommended_actions": [
+      "Identify and document the accountable owner for legacy-release-bot.",
+      "Confirm production write access is still required and replace it with narrower or time-limited access if possible.",
+      "Review and rotate the account\u2019s credentials because it has active production access.",
+      "Add monitoring for pushes and permission changes by unmatched service accounts."
+    ],
+    "proposed_tools": [
+      {
+        "name": "list_active_unmatched_accounts",
+        "description": "Lists active IdP, Workspace, and GitHub accounts that have no linked person, including account identifiers and recent activity.",
+        "parameters": [],
+        "sql": "SELECT 'idp' AS system, account_id, username AS account_name, NULL AS account_type, status, last_login_at AS last_activity_at FROM idp_accounts WHERE person_id IS NULL AND status = 'active' UNION ALL SELECT 'workspace', account_id, primary_email, NULL, status, last_login_at FROM workspace_accounts WHERE person_id IS NULL AND status = 'active' UNION ALL SELECT 'github', account_id, login, account_type, status, last_active_at FROM github_accounts WHERE person_id IS NULL AND status = 'active'",
+        "example_args": {},
+        "supports_findings": [
+          2
+        ],
+        "validation": "ok: 1 rows"
+      },
+      {
+        "name": "get_current_github_repository_access",
+        "description": "Returns current direct and team-derived repository permissions for a GitHub account, with sensitivity and permission grant IDs.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "type": "string",
+            "description": "GitHub account ID to inspect."
+          },
+          {
+            "name": "snapshot_at",
+            "type": "timestamp",
+            "description": "Snapshot timestamp used to exclude expired direct grants."
+          }
+        ],
+        "sql": "SELECT * FROM (SELECT ga.account_id AS account_id, ga.login AS login, 'direct' AS access_path, grc.permission_id AS permission_id, NULL AS membership_id, gr.repository_id AS repository_id, gr.name AS repository_name, gr.sensitivity AS sensitivity, gr.visibility AS visibility, gr.archived AS archived, grc.permission AS permission, grc.approval_reference AS approval_reference, grc.granted_at AS granted_at, grc.expires_at AS expires_at FROM github_accounts ga JOIN github_repo_collaborators grc ON grc.account_id = ga.account_id AND grc.revoked_at IS NULL AND (grc.expires_at IS NULL OR grc.expires_at > :snapshot_at) JOIN github_repositories gr ON gr.repository_id = grc.repository_id WHERE ga.account_id = :account_id UNION ALL SELECT ga.account_id, ga.login, 'team', gtrp.permission_id, gtm.membership_id, gr.repository_id, gr.name, gr.sensitivity, gr.visibility, gr.archived, gtrp.permission, NULL, gtrp.granted_at, NULL FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_team_repo_permissions gtrp ON gtrp.team_id = gtm.team_id AND gtrp.revoked_at IS NULL JOIN github_repositories gr ON gr.repository_id = gtrp.repository_id WHERE ga.account_id = :account_id) x ORDER BY repository_name, access_path",
+        "example_args": {
+          "account_id": "gha_900001",
+          "snapshot_at": "2026-08-15T12:00:00Z"
+        },
+        "supports_findings": [
+          1
+        ],
+        "validation": "ok: 1 rows"
+      },
+      {
+        "name": "get_current_github_memberships",
+        "description": "Returns current organization and team memberships for a GitHub account, including role, source, and grant IDs.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "type": "string",
+            "description": "GitHub account ID to inspect."
+          }
+        ],
+        "sql": "SELECT * FROM (SELECT ga.account_id AS account_id, ga.login AS login, 'organization' AS scope_type, gom.membership_id AS grant_id, NULL AS scope_id, NULL AS scope_name, gom.org_role AS role, gom.source AS source, gom.granted_at AS granted_at FROM github_accounts ga JOIN github_org_memberships gom ON gom.account_id = ga.account_id AND gom.revoked_at IS NULL WHERE ga.account_id = :account_id UNION ALL SELECT ga.account_id, ga.login, 'team', gtm.membership_id, gt.team_id, gt.name, gtm.role, gtm.source, gtm.granted_at FROM github_accounts ga JOIN github_team_memberships gtm ON gtm.account_id = ga.account_id AND gtm.revoked_at IS NULL JOIN github_teams gt ON gt.team_id = gtm.team_id WHERE ga.account_id = :account_id) x ORDER BY scope_type, scope_name",
+        "example_args": {
+          "account_id": "gha_900001"
+        },
+        "supports_findings": [
+          4
+        ],
+        "validation": "ok: 1 rows"
+      },
+      {
+        "name": "get_account_audit_events_since",
+        "description": "Returns audit events where an account was the typed actor or target since a supplied timestamp.",
+        "parameters": [
+          {
+            "name": "account_id",
+            "type": "string",
+            "description": "Account ID to search for."
+          },
+          {
+            "name": "since_at",
+            "type": "timestamp",
+            "description": "Earliest event timestamp to return."
+          }
+        ],
+        "sql": "SELECT event_id, occurred_at, system, event_type, actor_type, actor_id, target_type, target_id, source, outcome, details_json FROM audit_events WHERE occurred_at >= :since_at AND ((actor_type = 'account' AND actor_id = :account_id) OR (target_type = 'account' AND target_id = :account_id)) ORDER BY occurred_at DESC",
+        "example_args": {
+          "account_id": "gha_900001",
+          "since_at": "2026-08-14T00:00:00Z"
+        },
+        "supports_findings": [
+          3
+        ],
+        "validation": "ok: 1 rows"
+      }
+    ]
+  }
+}

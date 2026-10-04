@@ -1,10 +1,10 @@
 import json
 
-from access_agent.tools import analyze_removal, find_person, get_person_access, list_people, list_removed_people, read_code, run_sql, submit_report
+from access_agent.tools import analyze_removal, find_hr_date_issues, find_person, get_leftover_direct_grants, get_person_access, list_people, list_removed_people, read_code, reconcile_app_assignments, run_sql, submit_report
 from access_agent.tools.base import Tool
 
-TOOLS: dict[str, Tool] = {t.name: t for t in [list_people.TOOL, find_person.TOOL, get_person_access.TOOL, list_removed_people.TOOL, analyze_removal.TOOL, submit_report.TOOL]}
-SQL_TOOLS: dict[str, Tool] = {t.name: t for t in [run_sql.TOOL, read_code.TOOL, submit_report.TOOL]}
+TOOLS: dict[str, Tool] = {t.name: t for t in [list_people.TOOL, find_person.TOOL, get_person_access.TOOL, list_removed_people.TOOL, analyze_removal.TOOL, get_leftover_direct_grants.TOOL, reconcile_app_assignments.TOOL, find_hr_date_issues.TOOL, submit_report.TOOL]}
+SQL_TOOLS: dict[str, Tool] = {t.name: t for t in [run_sql.TOOL, read_code.TOOL, submit_report.SQL_TOOL]}
 
 
 def execute_tool(name: str, raw_arguments: str, tools: dict[str, Tool] = TOOLS) -> str:

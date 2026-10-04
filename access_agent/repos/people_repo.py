@@ -42,6 +42,9 @@ class PeopleRepo:
         """
         return [Person(**r) for r in self.db.query(sql, {"snapshot_date": snapshot_date, "since_date": since_date})]
 
+    def get_people_with_end_before_start(self) -> list[Person]:
+        return [Person(**r) for r in self.db.query("SELECT * FROM people WHERE end_date < start_date ORDER BY person_id")]
+
     def get_person(self, person_id: str) -> Person | None:
         row = self.db.query_one("SELECT * FROM people WHERE person_id = ?", (person_id,))
         return Person(**row) if row else None

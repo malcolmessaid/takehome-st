@@ -7,6 +7,7 @@ MAX_ROWS_LIMIT = 500
 
 
 class RunSqlArgs(BaseModel):
+    purpose: str = Field(description="One short sentence on what this query checks, e.g. 'Current GitHub collaborator grants for people who left'.")
     sql: str = Field(description="One read-only SQLite SELECT statement (WITH and WITH RECURSIVE are allowed).")
     max_rows: int = Field(default=100, ge=1, le=MAX_ROWS_LIMIT, description="Maximum rows to return. Prefer aggregates over large dumps.")
 

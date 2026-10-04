@@ -1,3 +1,5 @@
+import json
+
 from access_agent.llm_client import LLMClient
 from access_agent.logger import get_logger
 from access_agent.models.report import InvestigationReport
@@ -28,6 +30,13 @@ Rules:
 - Write reports for a busy human reviewer: short plain sentences, no jargon like "materially". Summarize lists (e.g. "6 apps including VPN and GitHub") instead of enumerating them."""
 
 
+def _parse_json(raw: str | None) -> dict:
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {"unparsed": raw}
+
+
 class AgentService:
     def __init__(self, llm: LLMClient | None = None, tools: dict[str, Tool] = TOOLS, system_prompt: str | None = None, max_steps: int = MAX_STEPS):
         self.llm = llm or LLMClient()
@@ -35,10 +44,15 @@ class AgentService:
         self.max_steps = max_steps
         self.tool_schemas = [t.schema() for t in tools.values()]
         self.messages: list[dict] = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT.format(snapshot_at=PeopleRepo().get_snapshot_time())}]
+        self.trace: list[dict] = []
 
     def run(self, user_message: str) -> InvestigationReport | str:
-        """Runs the tool loop for one user turn. Returns a report, or plain text if the model replies without a report."""
+        """Runs the tool loop for one user turn. Returns a report, or plain text if the model replies without a report.
+
+        self.trace holds this turn's tool calls (step, tool name, arguments, result size, error) for later inspection.
+        """
         self.messages.append({"role": "user", "content": user_message})
+        self.trace = []
         for step in range(self.max_steps):
             msg = self.llm.run(self.messages, tools=self.tool_schemas)
             if not msg.tool_calls:
@@ -49,11 +63,12 @@ class AgentService:
             for call in msg.tool_calls:
                 if call.function.name == SUBMIT_REPORT:
                     logger.info(f"Tool call step={step} tool_name={call.function.name}")
-                    report = InvestigationReport.model_validate_json(call.function.arguments)
+                    report = self.tools[SUBMIT_REPORT].args_model.model_validate_json(call.function.arguments)
                     result = '{"status": "report received"}'
                 else:
                     result = execute_tool(call.function.name, call.function.arguments, self.tools)
                     logger.info(f"Tool call step={step} tool_name={call.function.name} arguments={call.function.arguments} result_chars={len(result)}")
+                    self.trace.append({"step": step, "tool": call.function.name, "arguments": _parse_json(call.function.arguments), "result_chars": len(result), "error": json.loads(result).get("error") if result.startswith('{"error"') else None})
                 self.messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             if report is not None:
                 return report
