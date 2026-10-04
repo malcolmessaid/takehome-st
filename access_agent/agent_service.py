@@ -2,6 +2,7 @@ from access_agent.llm_client import LLMClient
 from access_agent.logger import get_logger
 from access_agent.models.report import InvestigationReport
 from access_agent.repos.people_repo import PeopleRepo
+from access_agent.tools.base import Tool
 from access_agent.tools.registry import TOOLS, execute_tool
 from access_agent.tools.submit_report import SUBMIT_REPORT
 
@@ -23,19 +24,22 @@ Rules:
 - Audit logs are incomplete. An event can prove an action happened without proving which human caused it.
 - You may recommend actions but never claim to have changed anything.
 - If the question is ambiguous (e.g. several people match a name), ask the user instead of guessing.
-- For simple lookups (e.g. "who is in the system"), answer directly in text. For investigations, finish by calling submit_report exactly once."""
+- For simple lookups (e.g. "who is in the system"), answer directly in text. For investigations, finish by calling submit_report exactly once.
+- Write reports for a busy human reviewer: short plain sentences, no jargon like "materially". Summarize lists (e.g. "6 apps including VPN and GitHub") instead of enumerating them."""
 
 
 class AgentService:
-    def __init__(self, llm: LLMClient | None = None):
+    def __init__(self, llm: LLMClient | None = None, tools: dict[str, Tool] = TOOLS, system_prompt: str | None = None, max_steps: int = MAX_STEPS):
         self.llm = llm or LLMClient()
-        self.tool_schemas = [t.schema() for t in TOOLS.values()]
-        self.messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT.format(snapshot_at=PeopleRepo().get_snapshot_time())}]
+        self.tools = tools
+        self.max_steps = max_steps
+        self.tool_schemas = [t.schema() for t in tools.values()]
+        self.messages: list[dict] = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT.format(snapshot_at=PeopleRepo().get_snapshot_time())}]
 
     def run(self, user_message: str) -> InvestigationReport | str:
         """Runs the tool loop for one user turn. Returns a report, or plain text if the model replies without a report."""
         self.messages.append({"role": "user", "content": user_message})
-        for step in range(MAX_STEPS):
+        for step in range(self.max_steps):
             msg = self.llm.run(self.messages, tools=self.tool_schemas)
             if not msg.tool_calls:
                 self.messages.append({"role": "assistant", "content": msg.content or ""})
@@ -48,10 +52,10 @@ class AgentService:
                     report = InvestigationReport.model_validate_json(call.function.arguments)
                     result = '{"status": "report received"}'
                 else:
-                    result = execute_tool(call.function.name, call.function.arguments)
+                    result = execute_tool(call.function.name, call.function.arguments, self.tools)
                     logger.info(f"Tool call step={step} tool_name={call.function.name} arguments={call.function.arguments} result_chars={len(result)}")
                 self.messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             if report is not None:
                 return report
-        logger.info(f"Agent hit step limit max_steps={MAX_STEPS}")
-        return f"Stopped after {MAX_STEPS} steps without a final report."
+        logger.info(f"Agent hit step limit max_steps={self.max_steps}")
+        return f"Stopped after {self.max_steps} steps without a final report."

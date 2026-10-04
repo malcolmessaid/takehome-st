@@ -36,6 +36,10 @@ class GoogleWorkspaceRepo:
         """
         return self.db.query(sql, {"account_id": account_id})
 
+    def get_current_oauth_grants(self, account_id: str) -> list[dict[str, Any]]:
+        sql = "SELECT grant_id, application_name, scopes_json, granted_at, last_used_at FROM workspace_oauth_grants WHERE account_id = ? AND revoked_at IS NULL"
+        return self.db.query(sql, (account_id,))
+
     def get_owned_resources(self, account_id: str) -> list[dict[str, Any]]:
         sql = "SELECT resource_id, name AS resource_name, resource_type, classification FROM drive_resources WHERE owner_account_id = ? ORDER BY name"
         return self.db.query(sql, (account_id,))

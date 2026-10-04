@@ -32,6 +32,16 @@ class PeopleRepo:
     def get_departments(self) -> list[str]:
         return [r["department"] for r in self.db.query("SELECT DISTINCT department FROM people ORDER BY 1")]
 
+    def list_removed_people(self, snapshot_date: str, since_date: str | None = None) -> list[Person]:
+        """People marked ended, plus anyone whose end_date has passed without being marked ended. since_date filters on end_date."""
+        sql = """
+            SELECT * FROM people
+            WHERE (employment_status = 'ended' OR (end_date IS NOT NULL AND end_date <= :snapshot_date))
+              AND (:since_date IS NULL OR end_date >= :since_date)
+            ORDER BY end_date DESC
+        """
+        return [Person(**r) for r in self.db.query(sql, {"snapshot_date": snapshot_date, "since_date": since_date})]
+
     def get_person(self, person_id: str) -> Person | None:
         row = self.db.query_one("SELECT * FROM people WHERE person_id = ?", (person_id,))
         return Person(**row) if row else None
