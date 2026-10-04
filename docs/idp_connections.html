@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Access snapshot: how access flows</title>
+<style>
+  body { margin:0; background:#0f1420; color:#e6ebf5; font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; display:flex; min-height:100vh; }
+  nav { width:180px; flex-shrink:0; background:#131a2a; border-right:1px solid #2c3a57; padding:24px 12px; }
+  nav .title { color:#93a0bb; font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:0 10px 10px; }
+  nav button { display:block; width:100%; text-align:left; background:none; border:0; border-radius:8px; color:#c3cbe0; font:inherit; padding:9px 10px; margin-bottom:4px; cursor:pointer; }
+  nav button:hover { background:#1c2538; }
+  nav button.active { background:#22304d; color:#fff; box-shadow:inset 3px 0 0 #6ea8ff; }
+  main { flex:1; overflow:auto; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .wrap { padding:28px 32px; }
+  h1 { margin:0 0 4px; font-size:20px; }
+  .sub { color:#93a0bb; margin-bottom:12px; }
+  svg text { font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .t { fill:#e6ebf5; font-size:14px; font-weight:600; font-family:ui-monospace, Menlo, monospace; }
+  .d { fill:#93a0bb; font-size:12px; }
+  .lbl { fill:#e6ebf5; font-size:12px; }
+  .muted { fill:#93a0bb; font-size:12px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6ea8ff"/></marker>
+    <marker id="arr-o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f3a952"/></marker>
+    <marker id="arr-n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5fd3a4"/></marker>
+    <marker id="arr-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6785"/></marker>
+  </defs>
+</svg>
+<nav>
+  <div class="title">Systems</div>
+  <button data-tab="idp" class="active">Identity provider</button>
+  <button data-tab="google">Google Workspace</button>
+  <button data-tab="github">GitHub</button>
+</nav>
+<main>
+<section class="panel active" id="idp">
+<div class="wrap">
+  <h1>How IdP access reaches an application</h1>
+  <div class="sub">A person has one IdP account. The account joins groups, groups can sit inside other groups, and an assignment grants an application to a group (or, in principle, to a single account).</div>
+
+  <svg width="1140" height="330" viewBox="0 0 1140 330">
+    <!-- direct-to-account assignment (allowed, unused) -->
+    <path d="M285,110 C285,30 855,30 855,110" stroke="#5b6785" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#arr-g)"/>
+    <text class="muted" x="570" y="46" text-anchor="middle">assigned directly to one account (allowed, but 0 in this data)</text>
+
+    <!-- boxes -->
+    <rect x="20" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="95" y="145" text-anchor="middle">people</text>
+    <text class="d" x="95" y="168" text-anchor="middle">an employee in HR</text>
+
+    <rect x="210" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="285" y="145" text-anchor="middle">idp_accounts</text>
+    <text class="d" x="285" y="168" text-anchor="middle">their sign-in account</text>
+
+    <rect x="400" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="475" y="140" text-anchor="middle">idp_group_</text>
+    <text class="t" x="475" y="158" text-anchor="middle">memberships</text>
+    <text class="d" x="475" y="180" text-anchor="middle">"X is on this list"</text>
+
+    <rect x="590" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="665" y="145" text-anchor="middle">idp_groups</text>
+    <text class="d" x="665" y="168" text-anchor="middle">a named list</text>
+
+    <rect x="780" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="855" y="140" text-anchor="middle">idp_app_</text>
+    <text class="t" x="855" y="158" text-anchor="middle">assignments</text>
+    <text class="d" x="855" y="180" text-anchor="middle">"this list gets app Y"</text>
+
+    <rect x="970" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#6ea8ff"/>
+    <text class="t" x="1045" y="145" text-anchor="middle">applications</text>
+    <text class="d" x="1045" y="168" text-anchor="middle">the base: 8 apps</text>
+
+    <!-- main flow -->
+    <path d="M170,155 L208,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M360,155 L398,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M550,155 L588,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M740,155 L778,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M930,155 L968,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+
+    <!-- nesting loop -->
+    <path d="M665,200 C665,275 475,275 475,202" stroke="#f3a952" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#arr-o)"/>
+    <text class="lbl" x="570" y="292" text-anchor="middle">a group can itself be a member of another group (nesting)</text>
+  </svg>
+
+  <div class="sub">Only memberships and assignments with <code>revoked_at IS NULL</code> count as current access.</div>
+</div>
+</section>
+
+<section class="panel" id="google">
+<div class="wrap">
+  <h1>How Google Workspace access reaches a Drive file</h1>
+  <div class="sub">Same shape as the IdP. A person has one Google account, which joins Workspace groups, and a Drive permission shares a file with a group or directly with one account. Owning a file is a separate way in, with no permission row.</div>
+
+  <svg width="1140" height="380" viewBox="0 0 1140 380">
+    <path d="M285,110 C285,30 855,30 855,110" stroke="#5b6785" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#arr-g)"/>
+    <text class="muted" x="570" y="46" text-anchor="middle">shared directly with one account (180 of 720 permissions)</text>
+
+    <rect x="20" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="95" y="145" text-anchor="middle">people</text>
+    <text class="d" x="95" y="168" text-anchor="middle">an employee in HR</text>
+
+    <rect x="210" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="285" y="140" text-anchor="middle">workspace_</text>
+    <text class="t" x="285" y="158" text-anchor="middle">accounts</text>
+    <text class="d" x="285" y="180" text-anchor="middle">their Google account</text>
+
+    <rect x="400" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="475" y="140" text-anchor="middle">workspace_group_</text>
+    <text class="t" x="475" y="158" text-anchor="middle">memberships</text>
+    <text class="d" x="475" y="180" text-anchor="middle">"X is on this list"</text>
+
+    <rect x="590" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="665" y="140" text-anchor="middle">workspace_</text>
+    <text class="t" x="665" y="158" text-anchor="middle">groups</text>
+    <text class="d" x="665" y="180" text-anchor="middle">a named list</text>
+
+    <rect x="780" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="855" y="140" text-anchor="middle">drive_</text>
+    <text class="t" x="855" y="158" text-anchor="middle">permissions</text>
+    <text class="d" x="855" y="180" text-anchor="middle">"this list can open file Y"</text>
+
+    <rect x="970" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#6ea8ff"/>
+    <text class="t" x="1045" y="140" text-anchor="middle">drive_</text>
+    <text class="t" x="1045" y="158" text-anchor="middle">resources</text>
+    <text class="d" x="1045" y="180" text-anchor="middle">the base: 240 files</text>
+
+    <path d="M170,155 L208,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M360,155 L398,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M550,155 L588,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M740,155 L778,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M930,155 L968,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+
+    <path d="M665,200 C665,275 475,275 475,202" stroke="#f3a952" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#arr-o)"/>
+    <text class="lbl" x="570" y="292" text-anchor="middle">a group can itself be a member of another group (nesting)</text>
+
+    <path d="M285,200 L285,330 L1045,330 L1045,204" stroke="#5fd3a4" stroke-width="2" fill="none" marker-end="url(#arr-n)"/>
+    <text class="lbl" x="665" y="352" text-anchor="middle">owns the file: drive_resources.owner_account_id (all 240 files, 5 owned by archived accounts)</text>
+  </svg>
+
+  <div class="sub">A Google account links to the IdP only through <code>person_id</code>. Its ID (<code>gwa_…</code>) never matches an IdP ID (<code>idpa_…</code>).</div>
+  <div class="sub">A permission's <code>principal_type</code> can be <code>account</code>, <code>group</code>, <code>domain</code> (the whole company) or <code>external_email</code> (outside the company). This data only has account and group.</div>
+  <div class="sub">Drive permissions can also expire: check <code>expires_at</code> as well as <code>revoked_at</code>. There's no parent-folder column, so permissions don't visibly pass from a folder to the files in it.</div>
+</div>
+</section>
+
+<section class="panel" id="github">
+<div class="wrap">
+  <h1>How GitHub access reaches a repository</h1>
+  <div class="sub">A person has a GitHub account, which joins teams, and a team gets a permission on a repository. A repository can also be shared directly with one account as a collaborator.</div>
+
+  <svg width="1140" height="420" viewBox="0 0 1140 420">
+    <path d="M285,110 C285,30 1045,30 1045,110" stroke="#5b6785" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#arr-g)"/>
+    <text class="muted" x="665" y="46" text-anchor="middle">github_repo_collaborators: shared directly with one account (143)</text>
+
+    <rect x="20" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="95" y="145" text-anchor="middle">people</text>
+    <text class="d" x="95" y="168" text-anchor="middle">an employee in HR</text>
+
+    <rect x="210" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="285" y="140" text-anchor="middle">github_</text>
+    <text class="t" x="285" y="158" text-anchor="middle">accounts</text>
+    <text class="d" x="285" y="180" text-anchor="middle">a user or service account</text>
+
+    <rect x="400" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="475" y="140" text-anchor="middle">github_team_</text>
+    <text class="t" x="475" y="158" text-anchor="middle">memberships</text>
+    <text class="d" x="475" y="180" text-anchor="middle">"X is on this team"</text>
+
+    <rect x="590" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="665" y="145" text-anchor="middle">github_teams</text>
+    <text class="d" x="665" y="168" text-anchor="middle">a named team</text>
+
+    <rect x="780" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="855" y="140" text-anchor="middle">github_team_</text>
+    <text class="t" x="855" y="158" text-anchor="middle">repo_permissions</text>
+    <text class="d" x="855" y="180" text-anchor="middle">"this team can write to Y"</text>
+
+    <rect x="970" y="110" width="150" height="90" rx="10" fill="#182033" stroke="#6ea8ff"/>
+    <text class="t" x="1045" y="140" text-anchor="middle">github_</text>
+    <text class="t" x="1045" y="158" text-anchor="middle">repositories</text>
+    <text class="d" x="1045" y="180" text-anchor="middle">the base: 80 repos</text>
+
+    <path d="M170,155 L208,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M360,155 L398,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M550,155 L588,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M740,155 L778,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <path d="M930,155 L968,155" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+
+    <path d="M665,280 L665,204" stroke="#f3a952" stroke-width="2" stroke-dasharray="6 5" fill="none" marker-end="url(#arr-o)"/>
+    <text class="lbl" x="665" y="300" text-anchor="middle">membership synced from an IdP group (35 of 51 teams)</text>
+
+    <path d="M285,200 L285,246" stroke="#6ea8ff" stroke-width="2" marker-end="url(#arr)"/>
+    <rect x="210" y="248" width="150" height="90" rx="10" fill="#182033" stroke="#2c3a57"/>
+    <text class="t" x="285" y="278" text-anchor="middle">github_org_</text>
+    <text class="t" x="285" y="296" text-anchor="middle">memberships</text>
+    <text class="d" x="285" y="318" text-anchor="middle">member 912 · owner 3</text>
+
+    <path d="M285,338 L285,380 L1045,380 L1045,204" stroke="#5fd3a4" stroke-width="2" fill="none" marker-end="url(#arr-n)"/>
+    <text class="lbl" x="665" y="402" text-anchor="middle">org owners can reach every repo with no team or collaborator row (GitHub behaviour, not stored in the data)</text>
+  </svg>
+
+  <div class="sub">Org membership is the account being in the GitHub organisation at all (946 rows, 915 current). Most come from IdP sync (<code>idp_scim</code>), and 82 current ones were added by hand.</div>
+  <div class="sub">Teams don't nest here. A team with <code>source_idp_group_id</code> is fed by IdP group membership, which is how IdP groups end up granting repository access.</div>
+  <div class="sub">Collaborator grants can expire (<code>expires_at</code>), and their approval reference may be missing.</div>
+</div>
+</section>
+</main>
+<script>
+  const show = id => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === id));
+    history.replaceState(null, '', '#' + id);
+  };
+  document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+  const initial = location.hash.slice(1);
+  if (document.getElementById(initial)) show(initial);
+</script>
+</body>
+</html>
