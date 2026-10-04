@@ -19,6 +19,15 @@ def print_report(report: InvestigationReport) -> None:
         print(f"  - {action}")
 
 
+def print_credit(agent: AgentService) -> None:
+    try:
+        remaining, limit = agent.llm.get_credit_remaining()
+    except Exception as e:
+        print(f"OpenRouter credit: unavailable ({type(e).__name__})")
+        return
+    print("OpenRouter credit: no spending limit on this key" if limit is None else f"OpenRouter credit: ${remaining:.2f} of ${limit:.2f} remaining")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Interactive access investigation agent.")
     parser.add_argument("--verbosity", type=Verbosity, choices=list(Verbosity), default=Verbosity.CLEAN, help="clean: no logs. mini: tool-call logs only. verbose: all logs.")
@@ -26,6 +35,7 @@ def main() -> None:
     configure_logging(args.verbosity)
     agent = AgentService()
     print(f"Access investigation agent ({agent.llm.model}, verbosity={args.verbosity}). Type 'exit', press Ctrl-C, or Ctrl-D to quit.")
+    print_credit(agent)
     try:
         while True:
             user_input = input("\nyou> ").strip()

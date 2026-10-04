@@ -2,7 +2,8 @@ from access_agent.llm_client import LLMClient
 from access_agent.logger import get_logger
 from access_agent.models.report import InvestigationReport
 from access_agent.repos.people_repo import PeopleRepo
-from access_agent.tools import SUBMIT_REPORT, TOOLS, execute_tool
+from access_agent.tools.registry import TOOLS, execute_tool
+from access_agent.tools.submit_report import SUBMIT_REPORT
 
 logger = get_logger(__name__)
 

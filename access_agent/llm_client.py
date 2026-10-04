@@ -1,4 +1,6 @@
+import json
 import os
+import urllib.request
 from pathlib import Path
 
 from openai import OpenAI
@@ -9,7 +11,7 @@ from access_agent.logger import get_logger
 logger = get_logger(__name__)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "openai/gpt-5.6-luna"
+DEFAULT_MODEL = "openai/gpt-5.6-sol"
 TOKEN_FILE = Path(__file__).resolve().parent.parent / "token.txt"
 
 
@@ -27,7 +29,15 @@ class LLMClient:
 
     def __init__(self, model: str | None = None):
         self.model = model or os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
-        self.client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=load_api_key())
+        self.api_key = load_api_key()
+        self.client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=self.api_key)
+
+    def get_credit_remaining(self) -> tuple[float | None, float | None]:
+        """(remaining, limit) in USD for this API key. limit is None for keys without a spending cap."""
+        request = urllib.request.Request(f"{OPENROUTER_BASE_URL}/key", headers={"Authorization": f"Bearer {self.api_key}"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            data = json.load(response)["data"]
+        return data.get("limit_remaining"), data.get("limit")
 
     def run(self, messages: list[dict], tools: list[dict] | None = None) -> ChatCompletionMessage:
         logger.info(f"Calling LLM model={self.model} message_count={len(messages)} tool_count={len(tools or [])}")
