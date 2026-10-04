@@ -37,6 +37,10 @@ def print_report(report: InvestigationReport) -> None:
     print(f"\n{BOLD}RECOMMENDED ACTIONS{RESET}")
     for i, action in enumerate(report.recommended_actions, 1):
         print(wrap(action, "     ", f"  {i}. "))
+    v = report.verification
+    if v:
+        line = v.get("incomplete") or f"{v['ids_checked']} IDs checked, {len(v['ids_not_found_in_draft'])} not found in draft, revised: {'yes' if v['revised'] else 'no'}, findings changed: {v['findings_changed']}, dropped: {v['findings_dropped']}"
+        print(f"\n{DIM}Evidence check: {line}{RESET}")
 
 
 def print_proposed_tools(report: SqlInvestigationReport) -> None:

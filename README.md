@@ -71,10 +71,16 @@ Simple lookups get a plain-text answer. Investigations end in a report with a su
 | `list_people`, `find_person`             | Browse people; resolve a name or email to a `person_id`                                                                         |
 | `get_person_access`                      | Everything a person can access: IdP groups (nested) and apps, Workspace groups and Drive, GitHub org, teams, and repos, devices |
 | `list_removed_people`, `analyze_removal` | Who has left, and per-person checks of whether their access was removed, with severity                                          |
-| `get_leftover_direct_grants`             | Drive, GitHub collaborator, and OAuth grants still held by people who left                                                      |
+| `get_leftover_direct_grants`             | Company-wide sweep of Drive, GitHub collaborator, and OAuth grants still held by people who left                               |
 | `reconcile_app_assignments`              | IdP assignments compared with what each application reports, with coverage per app                                              |
-| `find_hr_date_issues`                    | Records with dates in an impossible order (end before start, etc.)                                                              |
-| `submit_report`                          | Final structured report                                                                                                         |
+| `find_change_events`, `get_activity_timeline` | Recent access and security changes with risk flags; the audit trail around an event, person, account, IP, or correlation ID |
+| `find_privileged_access`                 | Org owners, app admins, and notable high-privilege or unapproved repo grants (counts for the rest)                             |
+| `find_risky_oauth_grants`, `find_mfa_gaps` | Third-party apps with sensitive scopes or few users; MFA enrollment and sign-ins that skipped required MFA                    |
+| `find_lifecycle_anomalies`               | Impossible HR dates, activity before an account existed, and grants made after someone left                                    |
+| `find_unlinked_accounts`                 | Active accounts with no owning person (bots, service accounts, orphans)                                                        |
+| `submit_report`                          | Final structured report; the first submission is a draft that goes through the evidence check                                  |
+
+The system prompt includes short playbooks mapping question types to tool chains. Before a report is accepted, every cited ID is looked up and the records are sent back to the model, which must confirm each finding against them and resubmit; the CLI shows what the check changed.
 
 
 **SQL agent** (`access_agent/sql_agent_service.py`): for questions the tools don't cover. The model gets the schema guide and table definitions in its prompt, writes its own read-only SQL (`run_sql`), and can read this project's code (`read_code`) to reuse tested queries. It's slower and costlier (~10–30 LLM calls per question). Each run also:

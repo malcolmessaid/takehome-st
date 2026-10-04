@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from access_agent.logger import get_logger
 from access_agent.repos.people_repo import PeopleRepo
 from access_agent.repos.security_repo import SecurityRepo
+from access_agent.services.access_review_service import AccessReviewService
 
 logger = get_logger(__name__)
 
@@ -12,6 +13,7 @@ HIGH_PRIVILEGE = {"admin", "maintain", "owner"}
 SENSITIVE_SCOPE_MARKERS = ("gmail", "mail.", "drive.readonly", "admin", "directory")
 RARE_CLIENT_MAX_ACCOUNTS = 2
 FOLLOW_UP_DAYS = 2
+GRANT_FIELDS = ("permission_id", "permission", "approval_reference", "granted_at", "expires_at", "repository_name", "sensitivity", "account_id", "login", "account_type", "account_status", "person_id")
 OWNER_FIELDS = ("system", "account_name", "status", "person_id", "full_name", "employment_status", "worker_type")
 
 
@@ -52,7 +54,7 @@ class SecurityReviewService:
 
     def get_activity_timeline(self, around_event_id: str | None = None, window_minutes: int = 30, start: str | None = None, end: str | None = None,
                               person_id: str | None = None, ip_address: str | None = None, correlation_id: str | None = None,
-                              systems: list[str] | None = None, include_routine: bool = True, limit: int = 100) -> dict:
+                              systems: list[str] | None = None, include_routine: bool = False, limit: int = 100) -> dict:
         """Audit events in a time window, optionally narrowed to a person, IP, correlation ID, or system.
 
         With around_event_id, the window is centred on that event, and events sharing its IP or correlation ID at any time are returned too.
@@ -111,8 +113,12 @@ class SecurityReviewService:
         logger.info(f"Found change events since_days={since_days} total={total}")
         return {"since": _iso(snapshot - timedelta(days=since_days)), "total": total, "truncated": total > len(events), "events": list(reversed(annotated))}
 
-    def find_privileged_access(self) -> dict:
-        """Standing privileged access: GitHub org owners, application admins, and repo grants that are high-privilege or unapproved."""
+    def find_privileged_access(self, include_all_grants: bool = False) -> dict:
+        """Standing privileged access: GitHub org owners, application admins, and repo grants that are high-privilege or unapproved.
+
+        By default only notable grants are returned in full (admin/maintain, sensitive or production repos, or held by an inactive account or person);
+        the rest are counted in collaborator_grant_summary to keep the result small.
+        """
         snapshot_at = self.people_repo.get_snapshot_time()
         owners = self.repo.get_org_owners()
         admins = self.repo.get_app_admins()
@@ -122,14 +128,16 @@ class SecurityReviewService:
             flags = [f for f, hit in (("high_privilege", g["permission"] in HIGH_PRIVILEGE), ("no_approval_reference", not g["approval_reference"]),
                                       ("no_expiry", not g["expires_at"]), ("production_critical", g["sensitivity"] == "production_critical")) if hit]
             if "high_privilege" in flags or "no_approval_reference" in flags:
-                flagged.append({**g, "flags": flags})
+                flagged.append({k: g[k] for k in GRANT_FIELDS} | {"flags": flags})
         person_ids = {r["person_id"] for r in owners + admins + flagged if r["person_id"]}
         people = {pid: self.people_repo.get_person(pid) for pid in person_ids}
         for r in owners + admins + flagged:
             p = people.get(r["person_id"])
             r["person"] = p.model_dump(include={"full_name", "employment_status", "worker_type", "end_date"}) if p else None
-        logger.info(f"Found privileged access org_owner_count={len(owners)} app_admin_count={len(admins)} flagged_grant_count={len(flagged)}")
-        return {"github_org_owners": owners, "application_admins": admins, "flagged_collaborator_grants": flagged}
+        notable = flagged if include_all_grants else [g for g in flagged if g["permission"] == "admin" or g["sensitivity"] in ("production_critical", "sensitive") or g["account_status"] != "active" or (g["person"] or {}).get("employment_status") != "active" or ("high_privilege" in g["flags"] and not g["approval_reference"])]
+        summary = {"flagged_grants": len(flagged), "by_flag": dict(Counter(f for g in flagged for f in g["flags"])), "by_permission": dict(Counter(g["permission"] for g in flagged)), "returned": len(notable)}
+        logger.info(f"Found privileged access org_owner_count={len(owners)} app_admin_count={len(admins)} flagged_grant_count={len(flagged)} returned_count={len(notable)}")
+        return {"github_org_owners": owners, "application_admins": admins, "collaborator_grant_summary": summary, "notable_collaborator_grants": notable}
 
     def find_risky_oauth_grants(self) -> dict:
         """Current OAuth grants with sensitive scopes (mail, full Drive, admin) or from rarely authorized apps."""
@@ -164,9 +172,9 @@ class SecurityReviewService:
         logger.info(f"Found MFA gaps application_name={application_name} signin_count={len(signins)}")
         return {"by_application": apps, "total_signins_without_required_mfa": len(signins), "signin_sample": sample}
 
-    def find_lifecycle_anomalies(self, limit: int = 25) -> dict:
-        """Timing that contradicts the HR record: account activity before the account existed or before the person started,
-        and grants created after the person's end date (new access for someone who already left, not a missed removal).
+    def find_lifecycle_anomalies(self, limit: int = 10) -> dict:
+        """Timing that contradicts the HR record: impossible HR dates (end before start), account activity before the account existed or before
+        the person started, and grants created after the person's end date (new access for someone who already left, not a missed removal).
 
         Early activity is ranked prehires first (people who haven't started yet), then by event count. If it affects many accounts, it is more
         likely a clock or data-generation issue than misuse, so the total is returned for context. Late grants are marked when the person's own
@@ -179,7 +187,7 @@ class SecurityReviewService:
             by_account[e["account_id"]].append(e)
         early_summary = [{"account_id": acct, "person_id": rows[0]["person_id"], "account_created_at": rows[0]["account_created_at"], "start_date": rows[0]["start_date"],
                           "event_count": len(rows), "reasons": dict(Counter(r["reason"] for r in rows)), "first_event": rows[0]["occurred_at"], "last_event": rows[-1]["occurred_at"],
-                          "event_ids": [r["event_id"] for r in rows][:20]} for acct, rows in by_account.items()]
+                          "sample_event_ids": [r["event_id"] for r in rows][:5]} for acct, rows in by_account.items()]
         people = {pid: self.people_repo.get_person(pid) for pid in {r["person_id"] for r in early_summary + late if r["person_id"]}}
         for r in early_summary + late:
             p = people.get(r["person_id"])
@@ -188,10 +196,19 @@ class SecurityReviewService:
             p = people.get(r["person_id"])
             r["person_dates_inconsistent"] = bool(p and p.end_date and p.start_date and p.end_date < p.start_date)
         early_summary.sort(key=lambda r: ((r["person"] or {}).get("employment_status") != "prehire", -r["event_count"]))
-        logger.info(f"Found lifecycle anomalies early_account_count={len(early_summary)} late_grant_count={len(late)}")
+        new_after_leaving = [{k: v for k, v in r.items() if k not in ("end_date", "person_dates_inconsistent")} for r in late if not r["person_dates_inconsistent"]]
+        rehire_like = defaultdict(list)
+        for r in late:
+            if r["person_dates_inconsistent"]:
+                rehire_like[r["person_id"]].append(r["grant_id"])
+        logger.info(f"Found lifecycle anomalies early_account_count={len(early_summary)} late_grant_count={len(late)} new_after_leaving_count={len(new_after_leaving)}")
         return {
+            "hr_date_issues": AccessReviewService().find_hr_date_issues(),
             "activity_before_account_or_start": {"accounts_affected": len(early_summary), "events": len(early), "prehire_accounts": sum(1 for r in early_summary if (r["person"] or {}).get("employment_status") == "prehire"), "top": early_summary[:limit]},
-            "grants_after_end_date": {"total": len(late), "for_people_with_consistent_dates": sum(1 for r in late if not r["person_dates_inconsistent"]), "grants": late},
+            "grants_after_end_date": {
+                "total": len(late), "new_access_after_leaving": new_after_leaving,
+                "people_with_inconsistent_dates": {pid: {"grant_count": len(ids), "sample_grant_ids": ids[:5]} for pid, ids in rehire_like.items()},
+            },
         }
 
     def find_unlinked_accounts(self) -> dict:

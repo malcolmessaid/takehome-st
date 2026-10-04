@@ -14,8 +14,8 @@ class GetActivityTimelineArgs(BaseModel):
     ip_address: str | None = Field(default=None, description="Only events from this IP address.")
     correlation_id: str | None = Field(default=None, description="Only events sharing this correlation ID.")
     systems: list[AuditSystem] | None = Field(default=None, description="Only these systems.")
-    include_routine: bool = Field(default=True, description="False hides high-volume routine events (logins, fetches, views, check-ins).")
-    limit: int = Field(default=100, ge=1, le=500, description="Maximum events to return, oldest first.")
+    include_routine: bool = Field(default=False, description="True also returns high-volume routine events (logins, fetches, views, check-ins). Only needed when narrowed to one person, IP, or correlation ID.")
+    limit: int = Field(default=100, ge=1, le=200, description="Maximum events to return, oldest first.")
 
 
 def get_activity_timeline(args: GetActivityTimelineArgs) -> dict:

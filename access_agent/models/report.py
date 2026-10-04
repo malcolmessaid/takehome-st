@@ -1,6 +1,7 @@
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 
 class FindingKind(StrEnum):
@@ -24,3 +25,4 @@ class InvestigationReport(BaseModel):
     findings: list[Finding] = Field(description="At most 7 findings, most severe first. Group related items into one finding.")
     data_gaps: list[str] = Field(description="Missing, incomplete, or contradictory data that limits the conclusions. One short sentence each.")
     recommended_actions: list[str] = Field(description="Short imperative next steps for a human, most urgent first, at most 5. Never claim to have taken them.")
+    verification: SkipJsonSchema[dict | None] = None
