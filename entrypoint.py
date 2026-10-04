@@ -56,6 +56,32 @@ def print_credit(agent: AgentService) -> None:
     print("OpenRouter credit: no spending limit on this key" if limit is None else f"OpenRouter credit: ${remaining:.2f} of ${limit:.2f} remaining")
 
 
+EXAMPLE_QUESTIONS = {
+    "tools": [
+        "Was Ariel Chen offboarded properly?",
+        "Check whether everyone who left had their access removed.",
+        "Has anything suspicious happened in the last two weeks?",
+        "Who has privileged access, and was it approved?",
+        "Which third-party apps can read people's email or Drive?",
+        "Where are we missing MFA?",
+        "Which applications aren't provisioning the users the IdP assigns?",
+        "Are there active accounts nobody owns?",
+    ],
+    "sql": [
+        "Who has access to the payments-api repository, and how?",
+        "Which departments have the most contractors with production access?",
+        "Find every bad offboarding and rank by severity.",
+        "Which Drive files are shared with whole groups and marked restricted?",
+    ],
+}
+
+
+def print_examples(agent_type: str) -> None:
+    print(f"\n{BOLD}Try asking:{RESET}")
+    for question in EXAMPLE_QUESTIONS[agent_type]:
+        print(f"  - {question}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Interactive access investigation agent.")
     parser.add_argument("--verbosity", type=Verbosity, choices=list(Verbosity), default=Verbosity.CLEAN, help="clean: no logs. mini: tool-call logs only. verbose: all logs.")
@@ -65,6 +91,7 @@ def main() -> None:
     agent = SqlAgentService() if args.agent == "sql" else AgentService()
     print(f"Access investigation agent ({args.agent}, {agent.llm.model}, verbosity={args.verbosity}). Type 'exit', press Ctrl-C, or Ctrl-D to quit.")
     print_credit(agent)
+    print_examples(args.agent)
     try:
         while True:
             user_input = input("\nyou> ").strip()
